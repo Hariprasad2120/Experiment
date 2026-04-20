@@ -1,9 +1,9 @@
-import React from 'react'
+import { auth } from "@/auth"
+import { redirect } from "next/navigation"
+import { EvaluatorDashboard } from "@/components/dashboard/EvaluatorDashboard"
 
-const Manager = () => {
-  return (
-    <div>Manager</div>
-  )
+export default async function ManagerDashboard() {
+  const session = await auth()
+  if (!session || session.user.role !== "MANAGER") redirect("/dashboard")
+  return <EvaluatorDashboard role="Manager" userId={session.user.id} />
 }
-
-export default Manager

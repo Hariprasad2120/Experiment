@@ -1,8 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
@@ -10,4 +5,163 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  HR
+  TL
+  MANAGER
+  EMPLOYEE
+}
+
+enum AppraisalStatus {
+  PENDING
+  ASSIGNED
+  AVAILABILITY_PENDING
+  RATING_IN_PROGRESS
+  VOTING
+  SCHEDULED
+  COMPLETED
+}
+
+enum AvailabilityStatus {
+  PENDING
+  AVAILABLE
+  NOT_AVAILABLE
+}
+
+model User {
+  id       String  @id @default(cuid())
+  name     String
+  email    String  @unique
+  password String
+  role     Role    @default(EMPLOYEE)
+  isActive Boolean @default(true)
+
+  employee Employee? @relation("UserEmployee")
+
+  assignedAsHR      Assignment[] @relation("HRUser")
+  assignedAsTL      Assignment[] @relation("TLUser")
+  assignedAsManager Assignment[] @relation("ManagerUser")
+
+  availabilities Availability[]
+  ratings        Rating[]
+  votes          Vote[]
+  momsCreated    MOM[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Employee {
+  id          String   @id @default(cuid())
+  empId       String   @unique
+  name        String
+  email       String   @unique
+  department  String
+  joiningDate DateTime
+  userId      String?  @unique
+  user        User?    @relation("UserEmployee", fields: [userId], references: [id])
+
+  appraisals Appraisal[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Appraisal {
+  id          String          @id @default(cuid())
+  employeeId  String
+  employee    Employee        @relation(fields: [employeeId], references: [id])
+  cycleMonth  Int
+  cycleYear   Int
+  status      AppraisalStatus @default(PENDING)
+  finalDate   DateTime?
+  finalRating Float?
+
+  assignment     Assignment?
+  availabilities Availability[]
+  ratings        Rating[]
+  votes          Vote[]
+  mom            MOM?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([employeeId, cycleMonth, cycleYear])
+}
+
+model Assignment {
+  id          String    @id @default(cuid())
+  appraisalId String    @unique
+  appraisal   Appraisal @relation(fields: [appraisalId], references: [id])
+  hrId        String
+  hr          User      @relation("HRUser", fields: [hrId], references: [id])
+  tlId        String
+  tl          User      @relation("TLUser", fields: [tlId], references: [id])
+  managerId   String
+  manager     User      @relation("ManagerUser", fields: [managerId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Availability {
+  id          String             @id @default(cuid())
+  appraisalId String
+  appraisal   Appraisal          @relation(fields: [appraisalId], references: [id])
+  evaluatorId String
+  evaluator   User               @relation(fields: [evaluatorId], references: [id])
+  status      AvailabilityStatus @default(PENDING)
+  isLocked    Boolean            @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([appraisalId, evaluatorId])
+}
+
+model Rating {
+  id            String    @id @default(cuid())
+  appraisalId   String
+  appraisal     Appraisal @relation(fields: [appraisalId], references: [id])
+  evaluatorId   String
+  evaluator     User      @relation(fields: [evaluatorId], references: [id])
+  criteria      Json
+  overallRating Float
+  comment       String?
+  isLocked      Boolean   @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([appraisalId, evaluatorId])
+}
+
+model Vote {
+  id           String    @id @default(cuid())
+  appraisalId  String
+  appraisal    Appraisal @relation(fields: [appraisalId], references: [id])
+  evaluatorId  String
+  evaluator    User      @relation(fields: [evaluatorId], references: [id])
+  selectedDate DateTime
+
+  createdAt DateTime @default(now())
+
+  @@unique([appraisalId, evaluatorId])
+}
+
+model MOM {
+  id          String    @id @default(cuid())
+  appraisalId String    @unique
+  appraisal   Appraisal @relation(fields: [appraisalId], references: [id])
+  content     String
+  finalRating Float?
+  increment   String?
+  createdById String
+  createdBy   User      @relation(fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

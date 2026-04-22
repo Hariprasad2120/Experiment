@@ -1,0 +1,220 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+import { prisma } from "@/lib/db";
+import { auth } from "@/lib/auth";
+import { sendEmail, assignmentEmail } from "@/lib/email";
+import { addBusinessDays } from "@/lib/business-days";
+import { syncCycleStatus } from "@/lib/workflow";
+import { autoCycleType } from "@/lib/appraisal-eligibility";
+import { canBeAppraised } from "@/lib/rbac";
+
+const schema = z.object({
+  employeeId: z.string(),
+  hrId: z.string(),
+  tlId: z.string(),
+  mgrId: z.string(),
+});
+
+const specialSchema = z.object({
+  employeeId: z.string(),
+  hrId: z.string(),
+  tlId: z.string(),
+  mgrId: z.string(),
+});
+
+type Result = { ok: true } | { ok: false; error: string };
+
+async function createOrReuseAssignments(
+  cycleId: string,
+  assignments: { role: "HR" | "TL" | "MANAGER"; reviewerId: string }[],
+  actorId: string,
+  employee: { name: string },
+  loginUrl: string,
+) {
+  await prisma.$transaction(async (tx) => {
+    for (const a of assignments) {
+      const existing = await tx.cycleAssignment.findUnique({
+        where: { cycleId_role: { cycleId, role: a.role } },
+      });
+      if (existing) {
+        if (existing.reviewerId !== a.reviewerId) {
+          await tx.auditLog.create({
+            data: {
+              cycleId,
+              actorId,
+              action: "REASSIGN_REVIEWER",
+              before: { role: a.role, reviewerId: existing.reviewerId },
+              after: { role: a.role, reviewerId: a.reviewerId },
+            },
+          });
+          await tx.cycleAssignment.update({
+            where: { id: existing.id },
+            data: {
+              reviewerId: a.reviewerId,
+              assignedById: actorId,
+              assignedAt: new Date(),
+              availability: "PENDING",
+              availabilitySubmittedAt: null,
+            },
+          });
+        }
+      } else {
+        await tx.cycleAssignment.create({
+          data: {
+            cycleId,
+            role: a.role,
+            reviewerId: a.reviewerId,
+            assignedById: actorId,
+          },
+        });
+      }
+    }
+  });
+
+  const reviewerIds = assignments.map((a) => a.reviewerId);
+  const reviewers = await prisma.user.findMany({ where: { id: { in: reviewerIds } } });
+  const roleByReviewer = new Map(assignments.map((a) => [a.reviewerId, a.role]));
+
+  for (const r of reviewers) {
+    const role = roleByReviewer.get(r.id) ?? "Reviewer";
+    const mail = assignmentEmail({ reviewerName: r.name, employeeName: employee.name, role, loginUrl });
+    await sendEmail({ to: r.email, ...mail }).catch(() => {});
+    await prisma.notification.create({
+      data: {
+        userId: r.id,
+        type: "ASSIGNMENT",
+        message: `Assigned as ${role} reviewer for ${employee.name}`,
+        link: `/reviewer/${cycleId}`,
+      },
+    });
+  }
+}
+
+/** Standard assign — cycle type auto-determined from joining date. */
+export async function assignReviewersAction(input: z.infer<typeof schema>): Promise<Result> {
+  const session = await auth();
+  if (!session?.user || session.user.role !== "ADMIN") return { ok: false, error: "Forbidden" };
+
+  const parsed = schema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Invalid input" };
+
+  const { employeeId, hrId, tlId, mgrId } = parsed.data;
+
+  const employee = await prisma.user.findUnique({ where: { id: employeeId } });
+  if (!employee || !canBeAppraised(employee.role)) return { ok: false, error: "Employee not found" };
+
+  // Auto-determine cycle type from joining date
+  const cycleType = autoCycleType(employee.joiningDate);
+
+  let cycle = await prisma.appraisalCycle.findFirst({
+    where: { userId: employeeId, status: { notIn: ["CLOSED", "DECIDED"] } },
+    orderBy: { createdAt: "desc" },
+  });
+
+  if (!cycle) {
+    cycle = await prisma.appraisalCycle.create({
+      data: {
+        userId: employeeId,
+        type: cycleType,
+        startDate: new Date(),
+        status: "PENDING_SELF",
+        self: {
+          create: { answers: {}, editableUntil: addBusinessDays(new Date(), 3) },
+        },
+      },
+    });
+  }
+
+  const assignments: { role: "HR" | "TL" | "MANAGER"; reviewerId: string }[] = [
+    { role: "HR", reviewerId: hrId },
+    { role: "TL", reviewerId: tlId },
+    { role: "MANAGER", reviewerId: mgrId },
+  ];
+
+  const loginUrl = `${process.env.APP_URL ?? "http://localhost:3000"}/login`;
+  await createOrReuseAssignments(cycle.id, assignments, session.user.id, employee, loginUrl);
+  await syncCycleStatus(cycle.id);
+
+  revalidatePath(`/admin/employees/${employeeId}/assign`);
+  revalidatePath("/admin");
+  return { ok: true };
+}
+
+/** Special appraisal — admin-initiated only, outside normal milestone schedule. */
+export async function startSpecialAppraisalAction(input: z.infer<typeof specialSchema>): Promise<Result> {
+  const session = await auth();
+  if (!session?.user || session.user.role !== "ADMIN") return { ok: false, error: "Forbidden" };
+
+  const parsed = specialSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Invalid input" };
+
+  const { employeeId, hrId, tlId, mgrId } = parsed.data;
+
+  const employee = await prisma.user.findUnique({ where: { id: employeeId } });
+  if (!employee || !canBeAppraised(employee.role)) return { ok: false, error: "Employee not found" };
+
+  const activeCycle = await prisma.appraisalCycle.findFirst({
+    where: { userId: employeeId, status: { notIn: ["CLOSED", "DECIDED"] } },
+  });
+  if (activeCycle) return { ok: false, error: "Employee already has an active cycle" };
+
+  const cycle = await prisma.appraisalCycle.create({
+    data: {
+      userId: employeeId,
+      type: "SPECIAL",
+      startDate: new Date(),
+      status: "PENDING_SELF",
+      self: {
+        create: { answers: {}, editableUntil: addBusinessDays(new Date(), 3) },
+      },
+    },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      cycleId: cycle.id,
+      actorId: session.user.id,
+      action: "SPECIAL_APPRAISAL_CREATED",
+      after: { initiatedBy: session.user.id },
+    },
+  });
+
+  const assignments: { role: "HR" | "TL" | "MANAGER"; reviewerId: string }[] = [
+    { role: "HR", reviewerId: hrId },
+    { role: "TL", reviewerId: tlId },
+    { role: "MANAGER", reviewerId: mgrId },
+  ];
+
+  const loginUrl = `${process.env.APP_URL ?? "http://localhost:3000"}/login`;
+  await createOrReuseAssignments(cycle.id, assignments, session.user.id, employee, loginUrl);
+  await syncCycleStatus(cycle.id);
+
+  revalidatePath(`/admin/employees/${employeeId}/assign`);
+  revalidatePath("/admin");
+  return { ok: true };
+}
+
+export async function fastForwardSelfAssessmentAction(cycleId: string): Promise<Result> {
+  const session = await auth();
+  if (!session?.user || session.user.role !== "ADMIN") return { ok: false, error: "Forbidden" };
+
+  const cycle = await prisma.appraisalCycle.findUnique({
+    where: { id: cycleId },
+    include: { self: true },
+  });
+  if (!cycle?.self) return { ok: false, error: "Cycle not found" };
+
+  await prisma.selfAssessment.update({
+    where: { cycleId },
+    data: { editableUntil: new Date(Date.now() - 60_000), locked: true },
+  });
+
+  await syncCycleStatus(cycleId);
+  revalidatePath(`/admin/employees/${cycle.userId}/assign`);
+  revalidatePath(`/reviewer/${cycleId}`);
+  revalidatePath("/reviewer");
+  revalidatePath("/employee");
+  return { ok: true };
+}

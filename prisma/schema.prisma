@@ -1,0 +1,295 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  MANAGEMENT
+  MANAGER
+  HR
+  TL
+  EMPLOYEE
+  PARTNER
+}
+
+enum ReviewerRole {
+  HR
+  TL
+  MANAGER
+}
+
+enum CycleType {
+  INTERIM
+  ANNUAL
+  SPECIAL
+}
+
+enum CycleStatus {
+  PENDING_SELF
+  SELF_SUBMITTED
+  AWAITING_AVAILABILITY
+  RATING_IN_PROGRESS
+  RATINGS_COMPLETE
+  DATE_VOTING
+  SCHEDULED
+  DECIDED
+  CLOSED
+}
+
+enum ReviewerAvailability {
+  PENDING
+  AVAILABLE
+  NOT_AVAILABLE
+}
+
+enum ExtensionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String
+  name          String
+  role          Role
+  department    String?
+  joiningDate   DateTime
+  active        Boolean  @default(true)
+  currentSalary Decimal? @db.Decimal(12, 2)
+
+  employeeNumber     Int?      @unique
+  firstName          String?
+  lastName           String?
+  location           String?
+  fatherName         String?
+  photo              String?
+  designation        String?
+  zohoRole           String?
+  employmentType     String?
+  employeeStatus     String?
+  sourceOfHire       String?
+  reportingManagerId String?
+  reportingManager   User?     @relation("Reporting", fields: [reportingManagerId], references: [id])
+  reports            User[]    @relation("Reporting")
+  dob                DateTime?
+  gender             String?
+  maritalStatus      String?
+  workPhone          String?
+  personalPhone      String?
+  personalEmail      String?
+  presentAddress     String?
+  permanentAddress   String?
+  aadhaar            String?
+  pan                String?
+  uan                String?
+  bankName           String?
+  bankAccount        String?
+  ifsc               String?
+  accountType        String?
+  stateCode          String?
+
+  salary EmployeeSalary?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cyclesAsEmployee  AppraisalCycle[]    @relation("EmpCycles")
+  assignmentsMade   CycleAssignment[]   @relation("AssignedBy")
+  assignments       CycleAssignment[]   @relation("Reviewer")
+  ratings           Rating[]
+  votes             DateVote[]
+  decisionsMade     AppraisalDecision[] @relation("DecidedBy")
+  notifications     Notification[]
+  auditLogs         AuditLog[]
+  momsCreated       MOM[]               @relation("MomAuthor")
+  extensionsRaised  ExtensionRequest[]  @relation("ExtRequester")
+  extensionsDecided ExtensionRequest[]  @relation("ExtDecider")
+
+  @@index([role, active])
+}
+
+model EmployeeSalary {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  grossAnnum     Decimal  @default(0) @db.Decimal(12, 2)
+  ctcAnnum       Decimal  @default(0) @db.Decimal(12, 2)
+  basic          Decimal  @default(0) @db.Decimal(12, 2)
+  hra            Decimal  @default(0) @db.Decimal(12, 2)
+  conveyance     Decimal  @default(0) @db.Decimal(12, 2)
+  transport      Decimal  @default(0) @db.Decimal(12, 2)
+  travelling     Decimal  @default(0) @db.Decimal(12, 2)
+  fixedAllowance Decimal  @default(0) @db.Decimal(12, 2)
+  stipend        Decimal  @default(0) @db.Decimal(12, 2)
+  updatedAt      DateTime @updatedAt
+}
+
+model AppraisalCycle {
+  id            String      @id @default(cuid())
+  userId        String
+  user          User        @relation("EmpCycles", fields: [userId], references: [id])
+  type          CycleType
+  startDate     DateTime
+  status        CycleStatus @default(PENDING_SELF)
+  scheduledDate DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  self        SelfAssessment?
+  assignments CycleAssignment[]
+  ratings     Rating[]
+  decision    AppraisalDecision?
+  extensions  ExtensionRequest[]
+  auditLogs   AuditLog[]
+  votes       DateVote[]
+  mom         MOM?
+
+  @@index([userId, status])
+  @@index([startDate])
+}
+
+model SelfAssessment {
+  id            String         @id @default(cuid())
+  cycleId       String         @unique
+  cycle         AppraisalCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  answers       Json
+  submittedAt   DateTime?
+  editableUntil DateTime
+  locked        Boolean        @default(false)
+}
+
+model CycleAssignment {
+  id                      String               @id @default(cuid())
+  cycleId                 String
+  cycle                   AppraisalCycle       @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  reviewerId              String
+  reviewer                User                 @relation("Reviewer", fields: [reviewerId], references: [id])
+  role                    ReviewerRole
+  availability            ReviewerAvailability @default(PENDING)
+  availabilitySubmittedAt DateTime?
+  assignedAt              DateTime             @default(now())
+  assignedById            String
+  assignedBy              User                 @relation("AssignedBy", fields: [assignedById], references: [id])
+
+  @@unique([cycleId, role])
+  @@index([reviewerId])
+}
+
+model Rating {
+  id           String         @id @default(cuid())
+  cycleId      String
+  cycle        AppraisalCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  reviewerId   String
+  reviewer     User           @relation(fields: [reviewerId], references: [id])
+  role         ReviewerRole
+  scores           Json
+  averageScore     Float
+  comments         String
+  postComment      String?
+  submittedAt      DateTime       @default(now())
+  locked           Boolean        @default(true)
+
+  @@unique([cycleId, role])
+  @@index([reviewerId])
+}
+
+model DateVote {
+  id        String         @id @default(cuid())
+  cycleId   String
+  cycle     AppraisalCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  voterId   String
+  voter     User           @relation(fields: [voterId], references: [id])
+  date      DateTime
+  createdAt DateTime       @default(now())
+
+  @@unique([cycleId, voterId])
+  @@index([cycleId, date])
+}
+
+model MOM {
+  id        String         @id @default(cuid())
+  cycleId   String         @unique
+  cycle     AppraisalCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  content   String
+  authorId  String
+  author    User           @relation("MomAuthor", fields: [authorId], references: [id])
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+}
+
+model AppraisalDecision {
+  id              String         @id @default(cuid())
+  cycleId         String         @unique
+  cycle           AppraisalCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  averagedRating  Float?
+  finalRating     Float
+  slabId          String?
+  slab            IncrementSlab? @relation(fields: [slabId], references: [id])
+  suggestedAmount Decimal        @db.Decimal(12, 2)
+  finalAmount     Decimal        @db.Decimal(12, 2)
+  comments        String?
+  decidedById     String
+  decidedBy       User           @relation("DecidedBy", fields: [decidedById], references: [id])
+  decidedAt       DateTime       @default(now())
+}
+
+model IncrementSlab {
+  id          String @id @default(cuid())
+  label       String
+  minRating   Float
+  maxRating   Float
+  hikePercent Float
+
+  decisions AppraisalDecision[]
+
+  @@index([minRating, maxRating])
+}
+
+model ExtensionRequest {
+  id            String          @id @default(cuid())
+  cycleId       String
+  cycle         AppraisalCycle  @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  requesterId   String
+  requester     User            @relation("ExtRequester", fields: [requesterId], references: [id])
+  reason        String
+  status        ExtensionStatus @default(PENDING)
+  extendedUntil DateTime?
+  decidedById   String?
+  decidedBy     User?           @relation("ExtDecider", fields: [decidedById], references: [id])
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  type      String
+  message   String
+  link      String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, read])
+}
+
+model AuditLog {
+  id        String          @id @default(cuid())
+  cycleId   String?
+  cycle     AppraisalCycle? @relation(fields: [cycleId], references: [id])
+  actorId   String
+  actor     User            @relation(fields: [actorId], references: [id])
+  action    String
+  before    Json?
+  after     Json?
+  createdAt DateTime        @default(now())
+
+  @@index([cycleId, createdAt])
+}

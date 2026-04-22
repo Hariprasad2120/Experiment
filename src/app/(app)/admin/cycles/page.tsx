@@ -1,0 +1,176 @@
+import { prisma } from "@/lib/db";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import Link from "next/link";
+import { FadeIn } from "@/components/motion-div";
+import { toTitleCase } from "@/lib/utils";
+import type { CycleStatus } from "@/generated/prisma/enums";
+
+const STATUS_COLORS: Record<CycleStatus, string> = {
+  PENDING_SELF: "bg-slate-100 text-slate-600",
+  SELF_SUBMITTED: "bg-blue-100 text-blue-700",
+  AWAITING_AVAILABILITY: "bg-yellow-100 text-yellow-700",
+  RATING_IN_PROGRESS: "bg-orange-100 text-orange-700",
+  RATINGS_COMPLETE: "bg-green-100 text-green-700",
+  DATE_VOTING: "bg-purple-100 text-purple-700",
+  SCHEDULED: "bg-teal-100 text-teal-700",
+  DECIDED: "bg-emerald-100 text-emerald-700",
+  CLOSED: "bg-slate-100 text-slate-500",
+};
+
+export default async function AdminCyclesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ status?: string; q?: string }>;
+}) {
+  const sp = await searchParams;
+
+  const where: Record<string, unknown> = {};
+  if (sp.status) where.status = sp.status;
+  if (sp.q) {
+    where.user = {
+      OR: [
+        { name: { contains: sp.q, mode: "insensitive" } },
+        { employeeNumber: { equals: Number(sp.q) || undefined } },
+      ],
+    };
+  }
+
+  const cycles = await prisma.appraisalCycle.findMany({
+    where,
+    include: {
+      user: true,
+      assignments: { include: { reviewer: { select: { name: true, role: true } } } },
+      ratings: { select: { averageScore: true, role: true } },
+      decision: { include: { slab: true } },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
+
+  const statusOptions: CycleStatus[] = [
+    "PENDING_SELF",
+    "SELF_SUBMITTED",
+    "AWAITING_AVAILABILITY",
+    "RATING_IN_PROGRESS",
+    "RATINGS_COMPLETE",
+    "DATE_VOTING",
+    "SCHEDULED",
+    "DECIDED",
+    "CLOSED",
+  ];
+
+  return (
+    <div className="space-y-6">
+      <FadeIn>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">All Appraisal Cycles</h1>
+            <p className="text-slate-500 text-sm mt-1">{cycles.length} cycles</p>
+          </div>
+        </div>
+      </FadeIn>
+
+      <FadeIn delay={0.1}>
+        <form className="flex flex-wrap gap-3">
+          <input
+            name="q"
+            placeholder="Search by name or Emp #"
+            defaultValue={sp.q}
+            className="border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 w-56"
+          />
+          <select
+            name="status"
+            defaultValue={sp.status ?? ""}
+            className="border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">All Statuses</option>
+            {statusOptions.map((s) => (
+              <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
+            ))}
+          </select>
+          <button
+            type="submit"
+            className="bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-lg px-4 py-2 text-sm font-medium hover:opacity-90 transition-opacity"
+          >
+            Filter
+          </button>
+          {(sp.q || sp.status) && (
+            <Link href="/admin/cycles" className="px-4 py-2 text-sm text-slate-500 hover:text-slate-700">
+              Clear
+            </Link>
+          )}
+        </form>
+      </FadeIn>
+
+      <FadeIn delay={0.15}>
+        <Card className="border-0 shadow-sm">
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-slate-500 border-b bg-slate-50 dark:bg-slate-800/50">
+                    <th className="py-3 px-4 font-medium">Employee</th>
+                    <th className="font-medium px-4">Emp #</th>
+                    <th className="font-medium px-4">Type</th>
+                    <th className="font-medium px-4">Status</th>
+                    <th className="font-medium px-4">Reviewers</th>
+                    <th className="font-medium px-4">Avg Score</th>
+                    <th className="font-medium px-4">Started</th>
+                    <th className="font-medium px-4">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {cycles.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="py-10 text-center text-slate-400">No cycles found</td>
+                    </tr>
+                  )}
+                  {cycles.map((c) => {
+                    const avg =
+                      c.ratings.length > 0
+                        ? (c.ratings.reduce((s, r) => s + r.averageScore, 0) / c.ratings.length).toFixed(2)
+                        : "—";
+                    return (
+                      <tr key={c.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                        <td className="py-3 px-4 font-medium text-slate-900 dark:text-white">
+                          {toTitleCase(c.user.name)}
+                        </td>
+                        <td className="px-4 text-slate-500">{c.user.employeeNumber ?? "—"}</td>
+                        <td className="px-4">
+                          <span className="text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded px-2 py-0.5">
+                            {c.type}
+                          </span>
+                        </td>
+                        <td className="px-4">
+                          <span className={`text-xs rounded-full px-2 py-0.5 font-medium ${STATUS_COLORS[c.status]}`}>
+                            {c.status.replace(/_/g, " ")}
+                          </span>
+                        </td>
+                        <td className="px-4 text-slate-500 text-xs">
+                          {c.assignments.length === 0
+                            ? "Not assigned"
+                            : c.assignments.map((a) => a.reviewer.name.split(" ")[0]).join(", ")}
+                        </td>
+                        <td className="px-4 font-medium text-slate-700 dark:text-slate-300">{avg}</td>
+                        <td className="px-4 text-slate-500">{c.startDate?.toLocaleDateString() ?? "—"}</td>
+                        <td className="px-4">
+                          <Link
+                            href={`/admin/employees/${c.userId}/assign`}
+                            className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                          >
+                            Manage
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      </FadeIn>
+    </div>
+  );
+}

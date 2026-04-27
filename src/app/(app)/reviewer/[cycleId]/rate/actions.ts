@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { sendEmail, rateCompletedEmail } from "@/lib/email";
 import { isRatingOpen, syncCycleStatus } from "@/lib/workflow";
+import { TOTAL_MAX_POINTS } from "@/lib/criteria";
 
 const schema = z.object({
   cycleId: z.string(),
@@ -54,18 +55,22 @@ export async function submitRatingAction(input: z.infer<typeof schema>): Promise
     if (peerCount === 0) return { ok: false, error: "Cannot Average Out — no peer has rated yet" };
   }
 
+  // Normalize: sum of category scores / total max * 100
   const numericValues = Object.values(scores).filter((v) => v > 0);
-  const avg = numericValues.length > 0 ? numericValues.reduce((s, v) => s + v, 0) / numericValues.length : 0;
+  const rawSum = numericValues.reduce((s, v) => s + v, 0);
+  const avg = (rawSum / TOTAL_MAX_POINTS) * 100;
 
   if (hasAverageOut) {
     const peerRatings = await prisma.rating.findMany({ where: { cycleId } });
-    const peerAvg = peerRatings.reduce((s, r) => s + r.averageScore, 0) / peerRatings.length;
+    const peerAvgNormalized = peerRatings.reduce((s, r) => s + r.averageScore, 0) / peerRatings.length;
+    // peerAvgNormalized is already 0-100; convert back to raw for averaged-out categories
+    const peerRawEquivalent = (peerAvgNormalized / 100) * TOTAL_MAX_POINTS;
     const resolvedScores: Record<string, number> = {};
     for (const [k, v] of Object.entries(scores)) {
-      resolvedScores[k] = v === -1 ? peerAvg : v;
+      resolvedScores[k] = v === -1 ? peerRawEquivalent : v;
     }
-    const resolvedAvg =
-      Object.values(resolvedScores).reduce((s, v) => s + v, 0) / Object.values(resolvedScores).length;
+    const resolvedRawSum = Object.values(resolvedScores).reduce((s, v) => s + v, 0);
+    const resolvedAvg = (resolvedRawSum / TOTAL_MAX_POINTS) * 100;
 
     await prisma.$transaction(async (tx) => {
       await tx.rating.create({

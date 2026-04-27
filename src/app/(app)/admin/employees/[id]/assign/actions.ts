@@ -13,15 +13,17 @@ import { canBeAppraised } from "@/lib/rbac";
 const schema = z.object({
   employeeId: z.string(),
   hrId: z.string(),
-  tlId: z.string(),
+  tlId: z.string().optional(),
   mgrId: z.string(),
+  isManagerCycle: z.boolean().optional(),
 });
 
 const specialSchema = z.object({
   employeeId: z.string(),
   hrId: z.string(),
-  tlId: z.string(),
+  tlId: z.string().optional(),
   mgrId: z.string(),
+  isManagerCycle: z.boolean().optional(),
 });
 
 type Result = { ok: true } | { ok: false; error: string };
@@ -85,8 +87,9 @@ async function createOrReuseAssignments(
       data: {
         userId: r.id,
         type: "ASSIGNMENT",
-        message: `Assigned as ${role} reviewer for ${employee.name}`,
+        message: `You have been assigned as ${role} reviewer for ${employee.name}'s appraisal. Please confirm your availability.`,
         link: `/reviewer/${cycleId}`,
+        persistent: true,
       },
     });
   }
@@ -95,15 +98,18 @@ async function createOrReuseAssignments(
 /** Standard assign — cycle type auto-determined from joining date. */
 export async function assignReviewersAction(input: z.infer<typeof schema>): Promise<Result> {
   const session = await auth();
-  if (!session?.user || session.user.role !== "ADMIN") return { ok: false, error: "Forbidden" };
+  if (!session?.user || (session.user.role !== "ADMIN" && session.user.secondaryRole !== "ADMIN")) return { ok: false, error: "Forbidden" };
 
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Invalid input" };
 
-  const { employeeId, hrId, tlId, mgrId } = parsed.data;
+  const { employeeId, hrId, tlId, mgrId, isManagerCycle } = parsed.data;
 
   const employee = await prisma.user.findUnique({ where: { id: employeeId } });
   if (!employee || !canBeAppraised(employee.role)) return { ok: false, error: "Employee not found" };
+
+  // For manager cycles: TL not required, MANAGEMENT will rate
+  if (!isManagerCycle && !tlId) return { ok: false, error: "TL reviewer required for non-manager cycles" };
 
   // Auto-determine cycle type from joining date
   const cycleType = autoCycleType(employee.joiningDate);
@@ -120,18 +126,26 @@ export async function assignReviewersAction(input: z.infer<typeof schema>): Prom
         type: cycleType,
         startDate: new Date(),
         status: "PENDING_SELF",
+        isManagerCycle: !!isManagerCycle,
         self: {
           create: { answers: {}, editableUntil: addBusinessDays(new Date(), 3) },
         },
       },
     });
+  } else if (isManagerCycle !== undefined) {
+    await prisma.appraisalCycle.update({
+      where: { id: cycle.id },
+      data: { isManagerCycle: !!isManagerCycle },
+    });
   }
 
   const assignments: { role: "HR" | "TL" | "MANAGER"; reviewerId: string }[] = [
     { role: "HR", reviewerId: hrId },
-    { role: "TL", reviewerId: tlId },
     { role: "MANAGER", reviewerId: mgrId },
   ];
+  if (!isManagerCycle && tlId) {
+    assignments.push({ role: "TL", reviewerId: tlId });
+  }
 
   const loginUrl = `${process.env.APP_URL ?? "http://localhost:3000"}/login`;
   await createOrReuseAssignments(cycle.id, assignments, session.user.id, employee, loginUrl);
@@ -145,15 +159,17 @@ export async function assignReviewersAction(input: z.infer<typeof schema>): Prom
 /** Special appraisal — admin-initiated only, outside normal milestone schedule. */
 export async function startSpecialAppraisalAction(input: z.infer<typeof specialSchema>): Promise<Result> {
   const session = await auth();
-  if (!session?.user || session.user.role !== "ADMIN") return { ok: false, error: "Forbidden" };
+  if (!session?.user || (session.user.role !== "ADMIN" && session.user.secondaryRole !== "ADMIN")) return { ok: false, error: "Forbidden" };
 
   const parsed = specialSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Invalid input" };
 
-  const { employeeId, hrId, tlId, mgrId } = parsed.data;
+  const { employeeId, hrId, tlId, mgrId, isManagerCycle } = parsed.data;
 
   const employee = await prisma.user.findUnique({ where: { id: employeeId } });
   if (!employee || !canBeAppraised(employee.role)) return { ok: false, error: "Employee not found" };
+
+  if (!isManagerCycle && !tlId) return { ok: false, error: "TL reviewer required for non-manager cycles" };
 
   const activeCycle = await prisma.appraisalCycle.findFirst({
     where: { userId: employeeId, status: { notIn: ["CLOSED", "DECIDED"] } },
@@ -166,6 +182,7 @@ export async function startSpecialAppraisalAction(input: z.infer<typeof specialS
       type: "SPECIAL",
       startDate: new Date(),
       status: "PENDING_SELF",
+      isManagerCycle: !!isManagerCycle,
       self: {
         create: { answers: {}, editableUntil: addBusinessDays(new Date(), 3) },
       },
@@ -183,9 +200,11 @@ export async function startSpecialAppraisalAction(input: z.infer<typeof specialS
 
   const assignments: { role: "HR" | "TL" | "MANAGER"; reviewerId: string }[] = [
     { role: "HR", reviewerId: hrId },
-    { role: "TL", reviewerId: tlId },
     { role: "MANAGER", reviewerId: mgrId },
   ];
+  if (!isManagerCycle && tlId) {
+    assignments.push({ role: "TL", reviewerId: tlId });
+  }
 
   const loginUrl = `${process.env.APP_URL ?? "http://localhost:3000"}/login`;
   await createOrReuseAssignments(cycle.id, assignments, session.user.id, employee, loginUrl);
@@ -198,7 +217,7 @@ export async function startSpecialAppraisalAction(input: z.infer<typeof specialS
 
 export async function fastForwardSelfAssessmentAction(cycleId: string): Promise<Result> {
   const session = await auth();
-  if (!session?.user || session.user.role !== "ADMIN") return { ok: false, error: "Forbidden" };
+  if (!session?.user || (session.user.role !== "ADMIN" && session.user.secondaryRole !== "ADMIN")) return { ok: false, error: "Forbidden" };
 
   const cycle = await prisma.appraisalCycle.findUnique({
     where: { id: cycleId },

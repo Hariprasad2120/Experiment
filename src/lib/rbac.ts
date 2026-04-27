@@ -23,26 +23,34 @@ export function isReviewer(role: Role): boolean {
   return REVIEWER_ROLES.includes(role);
 }
 
-export function isAdmin(role: Role): boolean {
-  return role === "ADMIN";
+export function hasRole(role: Role, secondaryRole: Role | null | undefined, target: Role): boolean {
+  return role === target || secondaryRole === target;
 }
 
-export function isManagement(role: Role): boolean {
-  return role === "MANAGEMENT" || role === "ADMIN";
+export function isAdmin(role: Role, secondaryRole?: Role | null): boolean {
+  return role === "ADMIN" || secondaryRole === "ADMIN";
 }
 
-export function canAccessPath(role: Role, pathname: string): boolean {
-  if (pathname.startsWith("/admin")) return role === "ADMIN";
-  if (pathname.startsWith("/management")) return isManagement(role);
-  if (pathname.startsWith("/reviewer")) return isReviewer(role) || isAdmin(role);
+export function isManagement(role: Role, secondaryRole?: Role | null): boolean {
+  return role === "MANAGEMENT" || isAdmin(role, secondaryRole);
+}
+
+export function canAccessPath(role: Role, pathname: string, secondaryRole?: Role | null): boolean {
+  // Management and partners may view employee pages (read-only server actions enforce roles)
+  if (pathname.startsWith("/admin/employees")) return isAdmin(role, secondaryRole) || role === "MANAGEMENT" || role === "PARTNER";
+  if (pathname.startsWith("/admin/cycles/")) return isAdmin(role, secondaryRole) || role === "MANAGEMENT" || role === "PARTNER";
+  if (pathname.startsWith("/admin")) return isAdmin(role, secondaryRole);
+  if (pathname.startsWith("/management")) return isManagement(role, secondaryRole);
+  if (pathname.startsWith("/reviewer")) return isReviewer(role) || isAdmin(role, secondaryRole) || secondaryRole === "HR" || secondaryRole === "TL" || secondaryRole === "MANAGER";
   if (pathname.startsWith("/employee")) return canBeAppraised(role);
-  if (pathname.startsWith("/partner")) return role === "PARTNER" || isAdmin(role);
+  if (pathname.startsWith("/partner")) return role === "PARTNER" || isAdmin(role, secondaryRole);
   if (pathname.startsWith("/history")) return true;
+  if (pathname.startsWith("/tickets")) return true;
   return true;
 }
 
-export function assertRole(actual: Role, allowed: Role[]): void {
-  if (!allowed.includes(actual)) {
+export function assertRole(actual: Role, allowed: Role[], secondary?: Role | null): void {
+  if (!allowed.includes(actual) && !(secondary && allowed.includes(secondary))) {
     throw new Error(`Forbidden: role ${actual} not in [${allowed.join(",")}]`);
   }
 }

@@ -8,10 +8,10 @@ import { syncCycleStatus } from "@/lib/workflow";
 
 const schema = z.object({
   cycleId: z.string(),
-  answers: z.record(z.string(), z.string().min(1)),
+  answers: z.record(z.string(), z.any()),
 });
 
-type Result = { ok: true } | { ok: false; error: string };
+type Result = { ok: true; editableUntil: string } | { ok: false; error: string };
 
 export async function submitSelfAction(input: z.infer<typeof schema>): Promise<Result> {
   const session = await auth();
@@ -21,12 +21,19 @@ export async function submitSelfAction(input: z.infer<typeof schema>): Promise<R
 
   const cycle = await prisma.appraisalCycle.findUnique({
     where: { id: parsed.data.cycleId },
-    include: { self: true },
+    include: {
+      self: true,
+      assignments: { include: { reviewer: { select: { id: true, name: true } } } },
+      user: { select: { name: true } },
+    },
   });
   if (!cycle || cycle.userId !== session.user.id) return { ok: false, error: "Forbidden" };
   if (!cycle.self) return { ok: false, error: "No self-assessment record" };
   if (cycle.self.locked) return { ok: false, error: "Locked" };
   if (new Date() > cycle.self.editableUntil) return { ok: false, error: "Edit window closed" };
+
+  const isFirstSubmission = !cycle.self.submittedAt;
+  const newEditCount = cycle.self.editCount + (isFirstSubmission ? 0 : 1);
 
   await prisma.$transaction(async (tx) => {
     await tx.selfAssessment.update({
@@ -34,6 +41,7 @@ export async function submitSelfAction(input: z.infer<typeof schema>): Promise<R
       data: {
         answers: parsed.data.answers,
         submittedAt: new Date(),
+        editCount: newEditCount,
       },
     });
     await tx.appraisalCycle.update({
@@ -44,5 +52,5 @@ export async function submitSelfAction(input: z.infer<typeof schema>): Promise<R
 
   await syncCycleStatus(parsed.data.cycleId);
   revalidatePath("/employee");
-  return { ok: true };
+  return { ok: true, editableUntil: cycle.self.editableUntil.toISOString() };
 }

@@ -6,12 +6,11 @@ import { daysUntilAnniversary } from "@/lib/business-days";
 import { toTitleCase } from "@/lib/utils";
 import {
   computeCycleStatus,
-  isReviewWindowOpen,
+  allReviewersAvailable,
   isSelfAssessmentSubmitted,
-  isSelfAssessmentWindowExpired,
 } from "@/lib/workflow";
 import { FadeIn, StaggerList, StaggerItem } from "@/components/motion-div";
-import { Calendar, Star, TrendingUp, FileText, ChevronRight } from "lucide-react";
+import { Calendar, Star, TrendingUp, FileText, ChevronRight, CheckCircle, Circle, Clock, Users } from "lucide-react";
 
 const STATUS_LABELS: Record<string, string> = {
   PENDING_SELF: "Self-assessment pending",
@@ -40,7 +39,9 @@ export default async function EmployeeDashboard() {
     take: 5,
     include: {
       self: true,
-      assignments: { select: { availability: true } },
+      assignments: {
+        include: { reviewer: { select: { id: true, name: true } } },
+      },
       ratings: { select: { role: true, averageScore: true, reviewerId: true } },
       decision: { include: { slab: true } },
       mom: true,
@@ -58,6 +59,9 @@ export default async function EmployeeDashboard() {
         ratings: cycle.ratings,
       })
     : null;
+
+  const allAvailable = cycle ? allReviewersAvailable(cycle.assignments) : false;
+  const selfSubmitted = cycle?.self ? isSelfAssessmentSubmitted(cycle.self) : false;
 
   return (
     <div className="space-y-6">
@@ -137,76 +141,114 @@ export default async function EmployeeDashboard() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4 text-sm">
-              {cycle.self &&
-                !isSelfAssessmentSubmitted(cycle.self) &&
-                !isSelfAssessmentWindowExpired(cycle.self) && (
-                  <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-3 flex items-center justify-between">
-                    <div>
-                      <p className="font-medium text-amber-800 dark:text-amber-300">Self-assessment due</p>
+
+              {/* Reviewer availability status */}
+              {cycle.assignments.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <Users className="size-3.5" /> Reviewer Availability
+                  </div>
+                  {cycle.assignments.map((a) => (
+                    <div key={a.id} className="flex items-center gap-2.5 py-0.5">
+                      {a.availability === "AVAILABLE" ? (
+                        <CheckCircle className="size-4 text-green-500 shrink-0" />
+                      ) : a.availability === "NOT_AVAILABLE" ? (
+                        <Circle className="size-4 text-red-400 shrink-0" />
+                      ) : (
+                        <Clock className="size-4 text-amber-400 shrink-0" />
+                      )}
+                      <span className="text-xs text-slate-700 dark:text-slate-300 flex-1">
+                        {toTitleCase(a.reviewer.name)}
+                      </span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                        a.availability === "AVAILABLE"
+                          ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                          : a.availability === "NOT_AVAILABLE"
+                          ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                          : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                      }`}>
+                        {a.role} · {a.availability === "AVAILABLE" ? "Available" : a.availability === "NOT_AVAILABLE" ? "Not Available" : "Pending"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Self-assessment status */}
+              {cycle.self && (
+                <div className={`rounded-lg p-3 flex items-center justify-between ${
+                  selfSubmitted
+                    ? "bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800"
+                    : allAvailable
+                    ? "bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800"
+                    : "bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                }`}>
+                  <div>
+                    <p className={`font-medium text-sm ${
+                      selfSubmitted ? "text-green-700 dark:text-green-400" : allAvailable ? "text-amber-700 dark:text-amber-300" : "text-slate-500"
+                    }`}>
+                      {selfSubmitted ? "Self-assessment submitted" : allAvailable ? "Self-assessment due" : "Self-assessment locked"}
+                    </p>
+                    {!selfSubmitted && allAvailable && (
                       <p className="text-xs text-amber-600 mt-0.5">
                         Deadline: {cycle.self.editableUntil.toLocaleString()}
                       </p>
-                    </div>
+                    )}
+                    {!allAvailable && !selfSubmitted && (
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Waiting for all reviewers to confirm availability
+                      </p>
+                    )}
+                  </div>
+                  {!selfSubmitted && allAvailable && (
                     <Link
                       href={`/employee/self/${cycle.id}`}
                       className="flex items-center gap-1 bg-amber-500 text-white rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-amber-600 transition-colors"
                     >
-                      Start <ChevronRight className="size-3" />
+                      {Object.keys(cycle.self.answers as object).length > 0 ? "Continue" : "Start"} <ChevronRight className="size-3" />
                     </Link>
-                  </div>
-                )}
-
-              {cycle.self && isSelfAssessmentSubmitted(cycle.self) && (
-                <p className="text-slate-500 text-xs">
-                  Self-assessment submitted — reviewers will proceed shortly.
-                </p>
+                  )}
+                </div>
               )}
 
-              {(displayStatus === "RATINGS_COMPLETE" ||
-                displayStatus === "DATE_VOTING" ||
-                displayStatus === "SCHEDULED" ||
-                displayStatus === "DECIDED" ||
-                displayStatus === "CLOSED") &&
-                cycle.ratings.length > 0 && (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">Ratings</span>
-                      <span className="text-sm font-bold text-slate-900 dark:text-white">
-                        Avg:{" "}
-                        {(
-                          cycle.ratings.reduce((s, r) => s + r.averageScore, 0) /
-                          cycle.ratings.length
-                        ).toFixed(2)}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      {cycle.ratings.map((r) => (
-                        <div
-                          key={r.role}
-                          className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3 text-center"
-                        >
-                          <div className="text-xs text-slate-500">{r.role}</div>
-                          <div className="text-lg font-bold text-slate-900 dark:text-white mt-1">
-                            {r.averageScore.toFixed(2)}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+              {/* Rating progress — show completion status only, no scores */}
+              {cycle.assignments.length > 0 && allAvailable && selfSubmitted && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    <Star className="size-3.5" /> Rating Progress
                   </div>
-                )}
+                  {cycle.assignments.map((a) => {
+                    const hasRated = cycle.ratings.some((r) => r.reviewerId === a.reviewer.id);
+                    return (
+                      <div key={a.id} className="flex items-center gap-2.5 py-0.5">
+                        {hasRated ? (
+                          <CheckCircle className="size-4 text-green-500 shrink-0" />
+                        ) : (
+                          <Circle className="size-4 text-slate-300 shrink-0" />
+                        )}
+                        <span className="text-xs text-slate-700 dark:text-slate-300 flex-1">
+                          {toTitleCase(a.reviewer.name)}
+                        </span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                          hasRated
+                            ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                            : "bg-slate-100 text-slate-500 dark:bg-slate-800"
+                        }`}>
+                          {a.role} · {hasRated ? "Rated" : "Pending"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
+              {/* Final decision */}
               {cycle.decision && (
                 <div className="bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg p-4 space-y-2">
                   <p className="text-xs font-semibold text-green-700 dark:text-green-400 uppercase tracking-wider">
                     Final Decision
                   </p>
-                  <div className="grid grid-cols-3 gap-3 text-sm">
-                    <div>
-                      <div className="text-xs text-slate-500">Rating</div>
-                      <div className="font-bold text-slate-900 dark:text-white">
-                        {cycle.decision.finalRating.toFixed(2)}
-                      </div>
-                    </div>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
                     <div>
                       <div className="text-xs text-slate-500">Slab</div>
                       <div className="font-bold text-slate-900 dark:text-white">

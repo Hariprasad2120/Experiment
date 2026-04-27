@@ -53,12 +53,27 @@ enum ExtensionStatus {
   REJECTED
 }
 
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
 model User {
   id            String   @id @default(cuid())
   email         String   @unique
   passwordHash  String
   name          String
   role          Role
+  secondaryRole Role?
   department    String?
   joiningDate   DateTime
   active        Boolean  @default(true)
@@ -95,7 +110,8 @@ model User {
   accountType        String?
   stateCode          String?
 
-  salary EmployeeSalary?
+  salary          EmployeeSalary?
+  salaryRevisions SalaryRevision[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -108,9 +124,14 @@ model User {
   decisionsMade     AppraisalDecision[] @relation("DecidedBy")
   notifications     Notification[]
   auditLogs         AuditLog[]
-  momsCreated       MOM[]               @relation("MomAuthor")
-  extensionsRaised  ExtensionRequest[]  @relation("ExtRequester")
-  extensionsDecided ExtensionRequest[]  @relation("ExtDecider")
+  momsCreated        MOM[]               @relation("MomAuthor")
+  extensionsRaised   ExtensionRequest[]  @relation("ExtRequester")
+  extensionsDecided  ExtensionRequest[]  @relation("ExtDecider")
+  criteriaOverrides  CriteriaOverride[]
+  ratingReviews      RatingReview[]
+  ticketsRaised      Ticket[]           @relation("TicketRaiser")
+  ticketsAssigned    Ticket[]           @relation("TicketAssignee")
+  ticketComments     TicketComment[]
 
   @@index([role, active])
 }
@@ -131,25 +152,52 @@ model EmployeeSalary {
   updatedAt      DateTime @updatedAt
 }
 
-model AppraisalCycle {
-  id            String      @id @default(cuid())
-  userId        String
-  user          User        @relation("EmpCycles", fields: [userId], references: [id])
-  type          CycleType
-  startDate     DateTime
-  status        CycleStatus @default(PENDING_SELF)
-  scheduledDate DateTime?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+model SalaryRevision {
+  id                  String   @id @default(cuid())
+  userId              String
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status              String   // "Approved" | "Pending" | "Rejected"
+  grossAnnum          Decimal  @db.Decimal(12, 2)
+  ctcAnnum            Decimal  @db.Decimal(12, 2)
+  revisedCtc          Decimal  @db.Decimal(12, 2)
+  isCTCChangedByPerc  Boolean  @default(false)
+  revisionPercentage  Decimal? @db.Decimal(6, 2)
+  effectiveFrom       DateTime
+  payoutMonth         DateTime
+  basic               Decimal  @default(0) @db.Decimal(12, 2)
+  hra                 Decimal  @default(0) @db.Decimal(12, 2)
+  conveyance          Decimal  @default(0) @db.Decimal(12, 2)
+  transport           Decimal  @default(0) @db.Decimal(12, 2)
+  travelling          Decimal  @default(0) @db.Decimal(12, 2)
+  fixedAllowance      Decimal  @default(0) @db.Decimal(12, 2)
+  stipend             Decimal  @default(0) @db.Decimal(12, 2)
+  createdAt           DateTime @default(now())
 
-  self        SelfAssessment?
-  assignments CycleAssignment[]
-  ratings     Rating[]
-  decision    AppraisalDecision?
-  extensions  ExtensionRequest[]
-  auditLogs   AuditLog[]
-  votes       DateVote[]
-  mom         MOM?
+  @@index([userId, effectiveFrom])
+}
+
+model AppraisalCycle {
+  id               String      @id @default(cuid())
+  userId           String
+  user             User        @relation("EmpCycles", fields: [userId], references: [id])
+  type             CycleType
+  startDate        DateTime
+  status           CycleStatus @default(PENDING_SELF)
+  scheduledDate    DateTime?
+  isManagerCycle   Boolean     @default(false)
+  ratingDeadline   DateTime?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  self          SelfAssessment?
+  assignments   CycleAssignment[]
+  ratings       Rating[]
+  decision      AppraisalDecision?
+  extensions    ExtensionRequest[]
+  auditLogs     AuditLog[]
+  votes         DateVote[]
+  mom           MOM?
+  ratingReviews RatingReview[]
 
   @@index([userId, status])
   @@index([startDate])
@@ -163,6 +211,7 @@ model SelfAssessment {
   submittedAt   DateTime?
   editableUntil DateTime
   locked        Boolean        @default(false)
+  editCount     Int            @default(0)
 }
 
 model CycleAssignment {
@@ -195,6 +244,8 @@ model Rating {
   postComment      String?
   submittedAt      DateTime       @default(now())
   locked           Boolean        @default(true)
+
+  ratingReviews    RatingReview[]
 
   @@unique([cycleId, role])
   @@index([reviewerId])
@@ -241,10 +292,12 @@ model AppraisalDecision {
 }
 
 model IncrementSlab {
-  id          String @id @default(cuid())
+  id          String  @id @default(cuid())
   label       String
+  grade       String  @default("")
   minRating   Float
   maxRating   Float
+  salaryTier  String  @default("ALL")
   hikePercent Float
 
   decisions AppraisalDecision[]
@@ -268,16 +321,19 @@ model ExtensionRequest {
 }
 
 model Notification {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  type      String
-  message   String
-  link      String?
-  read      Boolean  @default(false)
-  createdAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  type        String
+  message     String
+  link        String?
+  read        Boolean  @default(false)
+  persistent  Boolean  @default(false)
+  dismissed   Boolean  @default(false)
+  createdAt   DateTime @default(now())
 
   @@index([userId, read])
+  @@index([userId, dismissed])
 }
 
 model AuditLog {
@@ -292,4 +348,71 @@ model AuditLog {
   createdAt DateTime        @default(now())
 
   @@index([cycleId, createdAt])
+}
+
+/// Admin-editable override for criteria category questions.
+/// categoryName must match a CRITERIA_CATEGORIES[].name entry.
+/// questions replaces that category's default question list.
+model CriteriaOverride {
+  id           String   @id @default(cuid())
+  categoryName String   @unique
+  questions    Json     // string[]
+  maxPoints    Int?     // override default maxPoints; null = use default
+  updatedAt    DateTime @updatedAt
+  updatedById  String
+  updatedBy    User     @relation(fields: [updatedById], references: [id])
+}
+
+model Ticket {
+  id          String         @id @default(cuid())
+  raisedById  String
+  raisedBy    User           @relation("TicketRaiser", fields: [raisedById], references: [id])
+  assigneeId  String?
+  assignee    User?          @relation("TicketAssignee", fields: [assigneeId], references: [id])
+  title       String
+  description String
+  category    String
+  status      TicketStatus   @default(OPEN)
+  priority    TicketPriority @default(MEDIUM)
+  cycleId     String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  comments    TicketComment[]
+
+  @@index([raisedById, status])
+  @@index([status, createdAt])
+}
+
+model TicketComment {
+  id        String   @id @default(cuid())
+  ticketId  String
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+  message   String
+  createdAt DateTime @default(now())
+
+  @@index([ticketId, createdAt])
+}
+
+/// Post-comment review layer — reviewer can submit a revised rating per criterion
+/// without overwriting the original Rating record.
+model RatingReview {
+  id           String   @id @default(cuid())
+  ratingId     String
+  rating       Rating   @relation(fields: [ratingId], references: [id], onDelete: Cascade)
+  cycleId      String
+  cycle        AppraisalCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  reviewerId   String
+  reviewer     User     @relation(fields: [reviewerId], references: [id])
+  criteriaName String
+  originalScore Float
+  revisedScore  Float
+  justification String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([ratingId, criteriaName])
+  @@index([cycleId])
 }

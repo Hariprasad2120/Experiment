@@ -33,19 +33,33 @@ export function isSelfAssessmentWindowExpired(self: WorkflowSelf, now = new Date
   return now > self.editableUntil;
 }
 
-export function isReviewWindowOpen(cycle: Pick<WorkflowCycle, "self">, now = new Date()): boolean {
-  return isSelfAssessmentSubmitted(cycle.self) || isSelfAssessmentWindowExpired(cycle.self, now);
+export function allReviewersAvailable(assignments: WorkflowAssignment[]): boolean {
+  if (assignments.length === 0) return false;
+  return assignments.every((a) => a.availability === "AVAILABLE");
 }
 
 export function hasPendingAvailability(assignments: WorkflowAssignment[] = []): boolean {
   return assignments.some((assignment) => assignment.availability === "PENDING");
 }
 
+/** Self-assessment is open to the employee only after all reviewers confirmed AVAILABLE */
+export function isSelfAssessmentOpen(
+  cycle: Pick<WorkflowCycle, "self" | "assignments">,
+): boolean {
+  return allReviewersAvailable(cycle.assignments);
+}
+
+/** Rating window opens after employee submits self-assessment (or deadline passed) */
+export function isReviewWindowOpen(cycle: Pick<WorkflowCycle, "self" | "assignments">, now = new Date()): boolean {
+  if (!allReviewersAvailable(cycle.assignments)) return false;
+  return isSelfAssessmentSubmitted(cycle.self) || isSelfAssessmentWindowExpired(cycle.self, now);
+}
+
 export function isRatingOpen(
   cycle: Pick<WorkflowCycle, "self" | "assignments">,
   now = new Date(),
 ): boolean {
-  return isReviewWindowOpen(cycle, now) && !hasPendingAvailability(cycle.assignments);
+  return isReviewWindowOpen(cycle, now);
 }
 
 export function getVisibleAverageForReviewer(
@@ -74,10 +88,13 @@ export function computeCycleStatus(cycle: WorkflowCycle, now = new Date()): Cycl
     return "RATING_IN_PROGRESS";
   }
 
-  if (!isReviewWindowOpen(cycle, now)) {
-    return isSelfAssessmentSubmitted(cycle.self) ? "SELF_SUBMITTED" : "PENDING_SELF";
+  // All reviewers available → self-assessment phase
+  if (allReviewersAvailable(cycle.assignments)) {
+    if (isSelfAssessmentSubmitted(cycle.self)) return "SELF_SUBMITTED";
+    return "PENDING_SELF";
   }
 
+  // Some reviewers still pending/not-available → awaiting availability
   return "AWAITING_AVAILABILITY";
 }
 

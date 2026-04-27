@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 
 type PfType = "Capped" | "Uncapped";
 type City = "Chennai" | "Mumbai" | "Delhi" | "Kolkata" | "Mundra";
-type Coverage = "Self Only" | "Self + Spouse" | "Family" | "Family + Parents";
+type Coverage = "Nil" | "Self Only" | "Self + Spouse" | "Family" | "Family + Parents";
 type TaxRegime = "New" | "Old";
 
 function calcSalary(
@@ -26,9 +26,10 @@ function calcSalary(
   const basic = monthlyCTC * 0.5;
   const hra = city === "Chennai" ? basic * 0.5 : basic * 0.4;
   const employerPF = pfType === "Capped" ? Math.min(basic * 0.12, 1800) : basic * 0.12;
-  const gratuity = basic * 0.0481;
-  const specialAllowance = monthlyCTC - (basic + hra + employerPF + gratuity);
-  const gross = basic + hra + specialAllowance;
+  const travelAllowance = basic * 0.15;
+  const specialAllowance = monthlyCTC - (basic + hra + employerPF + travelAllowance);
+  const gross = basic + hra + specialAllowance + travelAllowance;
+  
 
   const employeePF = employerPF;
   const esiEmployer = gross <= 21000 ? gross * 0.0325 : 0;
@@ -36,7 +37,7 @@ function calcSalary(
 
   let pt = 0;
   if (city === "Chennai") {
-    pt = gross <= 12000 ? 0 : gross <= 21000 ? 200 : 300;
+    pt = gross <= 12000 ? 0 : gross <= 21000 ? 200 : 208;
   } else if (city === "Delhi") {
     pt = 0;
   } else {
@@ -44,11 +45,19 @@ function calcSalary(
   }
 
   let insurance = 0;
-  if (gross > 21000) {
-    const base = annualCTC < 400000 ? 1000 : annualCTC < 800000 ? 1500 : 2000;
-    const mult = coverage === "Self Only" ? 1 : coverage === "Self + Spouse" ? 1.5 : coverage === "Family" ? 2 : 3;
-    insurance = base * mult;
-  }
+
+if (coverage !== "Nil" && gross > 21000) {
+  const base = annualCTC < 400000 ? 1000 
+              : annualCTC < 800000 ? 1500 
+              : 2000;
+
+  const mult = coverage === "Self Only" ? 1 
+             : coverage === "Self + Spouse" ? 1.5 
+             : coverage === "Family" ? 2 
+             : 0;
+
+  insurance = base * mult;
+}
 
   const inHand = gross - employeePF - esiEmployee - pt;
 
@@ -65,7 +74,7 @@ function calcSalary(
   const finalTakeHome = inHand - tax + monthlyIncentive;
 
   return {
-    monthlyCTC, basic, hra, employerPF, gratuity, specialAllowance,
+    monthlyCTC, basic, hra, employerPF, travelAllowance, specialAllowance,
     gross, employeePF, esiEmployer, esiEmployee, pt, insurance,
     inHand, tax, finalTakeHome,
   };
@@ -95,11 +104,11 @@ export function SalaryCalculator() {
   const [empName, setEmpName] = useState("");
   const [empRole, setEmpRole] = useState("");
   const [doj, setDoj] = useState("");
-  const [annualCTC, setAnnualCTC] = useState(600000);
+  const [annualCTC, setAnnualCTC] = useState(0);
   const [pfType, setPfType] = useState<PfType>("Capped");
   const [city, setCity] = useState<City>("Chennai");
   const [incentive, setIncentive] = useState(0);
-  const [coverage, setCoverage] = useState<Coverage>("Family");
+  const [coverage, setCoverage] = useState<Coverage>("Nil");
   const [taxRegime, setTaxRegime] = useState<TaxRegime>("New");
 
   const calc = useMemo(
@@ -112,7 +121,7 @@ export function SalaryCalculator() {
     { label: "Basic (50%)", monthly: calc.basic, annual: calc.basic * 12, note: "50% of monthly CTC" },
     { label: "HRA", monthly: calc.hra, annual: calc.hra * 12, note: city === "Chennai" ? "50% of basic" : "40% of basic" },
     { label: "Employer PF", monthly: calc.employerPF, annual: calc.employerPF * 12, note: pfType === "Capped" ? "min(12%, ₹1800)" : "12% of basic" },
-    { label: "Gratuity", monthly: calc.gratuity, annual: calc.gratuity * 12, note: "4.81% of basic" },
+    { label: "travelAllowance", monthly: calc.travelAllowance, annual: calc.travelAllowance * 12, note: "15% of basic" },
     { label: "Special Allowance", monthly: calc.specialAllowance, annual: calc.specialAllowance * 12, note: "Balancing" },
     { label: "Gross Earnings", monthly: calc.gross, annual: calc.gross * 12, highlight: true },
     { label: "Employee PF (deduction)", monthly: -calc.employeePF, annual: -calc.employeePF * 12 },
@@ -131,9 +140,10 @@ export function SalaryCalculator() {
     { label: "HRA", monthly: calc.hra, annual: calc.hra * 12 },
     { label: "Special Allowance", monthly: calc.specialAllowance, annual: calc.specialAllowance * 12 },
     { label: "Employer PF", monthly: calc.employerPF, annual: calc.employerPF * 12 },
-    { label: "Gratuity", monthly: calc.gratuity, annual: calc.gratuity * 12 },
+    { label: "travelAllowance", monthly: calc.travelAllowance, annual: calc.travelAllowance * 12 },
     { label: "Insurance", monthly: calc.insurance, annual: calc.insurance * 12 },
     { label: "Total CTC", monthly: annualCTC / 12, annual: annualCTC, highlight: true },
+    { label: "CTC + Benefits", monthly: ( annualCTC / 12 ) + calc.insurance, annual: annualCTC + ( calc.insurance * 12 )}
   ];
 
   const esiApplies = calc.gross <= 21000;
@@ -211,7 +221,7 @@ export function SalaryCalculator() {
               <Select value={coverage} onValueChange={(v) => setCoverage(v as Coverage)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {(["Self Only", "Self + Spouse", "Family", "Family + Parents"] as Coverage[]).map((c) => (
+                  {(["Nil", "Self Only", "Self + Spouse", "Family", "Family + Parents"] as Coverage[]).map((c) => (
                     <SelectItem key={c} value={c}>{c}</SelectItem>
                   ))}
                 </SelectContent>
@@ -353,7 +363,7 @@ export function SalaryCalculator() {
                   <p>• Basic is 50% of CTC.</p>
                   <p>• HRA based on city ({city}) — {city === "Chennai" ? "50%" : "40%"} of basic.</p>
                   <p>• PF applied as per {pfType} method.</p>
-                  <p>• Gratuity included as long-term benefit.</p>
+                  <p>• travelAllowance included as long-term benefit.</p>
                   <p>• {esiApplies ? "Covered under ESI." : `Covered under insurance (${coverage}).`}</p>
                   <p>• PT applied based on location — ₹{fmt(calc.pt)}/month.</p>
                   <p>• {taxApplies ? `Income tax applied as per ${taxRegime} regime.` : "No income tax applicable under new regime."}</p>

@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { assignReviewersAction, startSpecialAppraisalAction } from "./actions";
-import { Users, CheckCircle, Zap, Info } from "lucide-react";
+import { Users, CheckCircle, Zap, Info, AlertTriangle } from "lucide-react";
 
 type Opt = { id: string; name: string };
 
@@ -16,48 +16,72 @@ type Props = {
   employeeName: string;
   existingCycleId: string | null;
   existingCycleType: string | null;
+  existingCycleIsManagerCycle: boolean;
   existingAssignments: { role: string; reviewerId: string }[];
-  autoType: string;        // determined by system ("ANNUAL" | "INTERIM")
-  autoReason: string;      // human-readable reason
-  eligible: boolean;       // is this employee at a milestone this month?
+  autoType: string;
+  autoReason: string;
+  eligible: boolean;
   hrUsers: Opt[];
   tlUsers: Opt[];
   mgrUsers: Opt[];
+  appraiseeId: string;
+  employeeRole: string;
 };
 
 export function AssignForm(props: Props) {
+  const { appraiseeId } = props;
+
+  const isManagerRole = props.employeeRole === "MANAGER";
+  const defaultManagerCycle = isManagerRole || props.existingCycleIsManagerCycle;
+
   const initial = (role: string) =>
     props.existingAssignments.find((a) => a.role === role)?.reviewerId ?? "";
 
   const [hr, setHr] = useState(initial("HR"));
   const [tl, setTl] = useState(initial("TL"));
   const [mgr, setMgr] = useState(initial("MANAGER"));
+  const [isManagerCycle, setIsManagerCycle] = useState(defaultManagerCycle);
   const [pending, startTransition] = useTransition();
 
   // Special appraisal state
   const [specialHr, setSpecialHr] = useState("");
   const [specialTl, setSpecialTl] = useState("");
   const [specialMgr, setSpecialMgr] = useState("");
+  const [specialIsManagerCycle, setSpecialIsManagerCycle] = useState(isManagerRole);
   const [specialPending, startSpecialTransition] = useTransition();
 
   const hasActive = !!props.existingCycleId;
-  const allSet = hr && tl && mgr;
-  const specialAllSet = specialHr && specialTl && specialMgr;
+  const allSet = isManagerCycle ? (hr && mgr) : (hr && tl && mgr);
+  const specialAllSet = specialIsManagerCycle ? (specialHr && specialMgr) : (specialHr && specialTl && specialMgr);
 
   function submit() {
-    if (!hr || !tl || !mgr) { toast.error("All three reviewers required"); return; }
+    if (!hr || !mgr) { toast.error("HR and Manager reviewers required"); return; }
+    if (!isManagerCycle && !tl) { toast.error("TL reviewer required for non-manager cycles"); return; }
     startTransition(async () => {
-      const res = await assignReviewersAction({ employeeId: props.employeeId, hrId: hr, tlId: tl, mgrId: mgr });
-      if (res.ok) toast.success("Reviewers assigned — emails sent");
+      const res = await assignReviewersAction({
+        employeeId: props.employeeId,
+        hrId: hr,
+        tlId: isManagerCycle ? undefined : tl,
+        mgrId: mgr,
+        isManagerCycle,
+      });
+      if (res.ok) toast.success("Reviewers assigned — notifications sent");
       else toast.error(res.error ?? "Failed");
     });
   }
 
   function submitSpecial() {
-    if (!specialHr || !specialTl || !specialMgr) { toast.error("All three reviewers required"); return; }
+    if (!specialHr || !specialMgr) { toast.error("HR and Manager reviewers required"); return; }
+    if (!specialIsManagerCycle && !specialTl) { toast.error("TL reviewer required for non-manager cycles"); return; }
     startSpecialTransition(async () => {
-      const res = await startSpecialAppraisalAction({ employeeId: props.employeeId, hrId: specialHr, tlId: specialTl, mgrId: specialMgr });
-      if (res.ok) toast.success("Special appraisal started — emails sent");
+      const res = await startSpecialAppraisalAction({
+        employeeId: props.employeeId,
+        hrId: specialHr,
+        tlId: specialIsManagerCycle ? undefined : specialTl,
+        mgrId: specialMgr,
+        isManagerCycle: specialIsManagerCycle,
+      });
+      if (res.ok) toast.success("Special appraisal started — notifications sent");
       else toast.error(res.error ?? "Failed");
     });
   }
@@ -97,16 +121,39 @@ export function AssignForm(props: Props) {
           )}
         </CardHeader>
         <CardContent className="space-y-5">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <ReviewerPicker label="HR Reviewer" color="bg-green-500" value={hr} onChange={setHr} options={props.hrUsers} />
-            <ReviewerPicker label="TL Reviewer" color="bg-amber-500" value={tl} onChange={setTl} options={props.tlUsers} />
-            <ReviewerPicker label="Manager Reviewer" color="bg-blue-500" value={mgr} onChange={setMgr} options={props.mgrUsers} />
+          {/* Manager cycle toggle */}
+          <label className="flex items-center gap-3 cursor-pointer select-none">
+            <div
+              className={`relative w-10 h-5 rounded-full transition-colors ${isManagerCycle ? "bg-purple-600" : "bg-slate-300 dark:bg-slate-600"}`}
+              onClick={() => { if (!isManagerRole) setIsManagerCycle((v) => !v); }}
+            >
+              <span className={`absolute top-0.5 left-0.5 size-4 bg-white rounded-full shadow transition-transform ${isManagerCycle ? "translate-x-5" : ""}`} />
+            </div>
+            <span className="text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+              <AlertTriangle className="size-3 text-purple-500" />
+              Manager Cycle
+              <span className="text-slate-400 font-normal">(no TL — MANAGEMENT rates instead)</span>
+            </span>
+          </label>
+
+          <div className={`grid grid-cols-1 gap-4 ${isManagerCycle ? "sm:grid-cols-2" : "sm:grid-cols-3"}`}>
+            <ReviewerPicker label="HR Reviewer" color="bg-green-500" value={hr} onChange={setHr} options={props.hrUsers} appraiseeId={appraiseeId} />
+            {!isManagerCycle && (
+              <ReviewerPicker label="TL Reviewer" color="bg-amber-500" value={tl} onChange={setTl} options={props.tlUsers} appraiseeId={appraiseeId} />
+            )}
+            <ReviewerPicker label="Manager Reviewer" color="bg-blue-500" value={mgr} onChange={setMgr} options={props.mgrUsers} appraiseeId={appraiseeId} />
           </div>
+
+          {isManagerCycle && (
+            <p className="text-xs text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 rounded-lg px-3 py-2">
+              Manager cycle: HR confirms availability, then MANAGEMENT team provides the final rating.
+            </p>
+          )}
 
           {allSet && (
             <div className="flex flex-wrap gap-3 text-xs text-slate-500 bg-slate-50 dark:bg-slate-800 rounded-lg px-3 py-2">
               <span className="flex items-center gap-1"><CheckCircle className="size-3 text-green-500" /> HR: {props.hrUsers.find((u) => u.id === hr)?.name}</span>
-              <span className="flex items-center gap-1"><CheckCircle className="size-3 text-amber-500" /> TL: {props.tlUsers.find((u) => u.id === tl)?.name}</span>
+              {!isManagerCycle && tl && <span className="flex items-center gap-1"><CheckCircle className="size-3 text-amber-500" /> TL: {props.tlUsers.find((u) => u.id === tl)?.name}</span>}
               <span className="flex items-center gap-1"><CheckCircle className="size-3 text-blue-500" /> MGR: {props.mgrUsers.find((u) => u.id === mgr)?.name}</span>
             </div>
           )}
@@ -130,16 +177,32 @@ export function AssignForm(props: Props) {
             </p>
           </CardHeader>
           <CardContent className="space-y-5">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <ReviewerPicker label="HR Reviewer" color="bg-green-500" value={specialHr} onChange={setSpecialHr} options={props.hrUsers} />
-              <ReviewerPicker label="TL Reviewer" color="bg-amber-500" value={specialTl} onChange={setSpecialTl} options={props.tlUsers} />
-              <ReviewerPicker label="Manager Reviewer" color="bg-blue-500" value={specialMgr} onChange={setSpecialMgr} options={props.mgrUsers} />
+            <label className="flex items-center gap-3 cursor-pointer select-none">
+              <div
+                className={`relative w-10 h-5 rounded-full transition-colors ${specialIsManagerCycle ? "bg-purple-600" : "bg-slate-300 dark:bg-slate-600"}`}
+                onClick={() => { if (!isManagerRole) setSpecialIsManagerCycle((v) => !v); }}
+              >
+                <span className={`absolute top-0.5 left-0.5 size-4 bg-white rounded-full shadow transition-transform ${specialIsManagerCycle ? "translate-x-5" : ""}`} />
+              </div>
+              <span className="text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                <AlertTriangle className="size-3 text-purple-500" />
+                Manager Cycle
+                <span className="text-slate-400 font-normal">(no TL — MANAGEMENT rates instead)</span>
+              </span>
+            </label>
+
+            <div className={`grid grid-cols-1 gap-4 ${specialIsManagerCycle ? "sm:grid-cols-2" : "sm:grid-cols-3"}`}>
+              <ReviewerPicker label="HR Reviewer" color="bg-green-500" value={specialHr} onChange={setSpecialHr} options={props.hrUsers} appraiseeId={appraiseeId} />
+              {!specialIsManagerCycle && (
+                <ReviewerPicker label="TL Reviewer" color="bg-amber-500" value={specialTl} onChange={setSpecialTl} options={props.tlUsers} appraiseeId={appraiseeId} />
+              )}
+              <ReviewerPicker label="Manager Reviewer" color="bg-blue-500" value={specialMgr} onChange={setSpecialMgr} options={props.mgrUsers} appraiseeId={appraiseeId} />
             </div>
 
             {specialAllSet && (
               <div className="flex flex-wrap gap-3 text-xs text-slate-500 bg-slate-50 dark:bg-slate-800 rounded-lg px-3 py-2">
                 <span className="flex items-center gap-1"><CheckCircle className="size-3 text-green-500" /> HR: {props.hrUsers.find((u) => u.id === specialHr)?.name}</span>
-                <span className="flex items-center gap-1"><CheckCircle className="size-3 text-amber-500" /> TL: {props.tlUsers.find((u) => u.id === specialTl)?.name}</span>
+                {!specialIsManagerCycle && specialTl && <span className="flex items-center gap-1"><CheckCircle className="size-3 text-amber-500" /> TL: {props.tlUsers.find((u) => u.id === specialTl)?.name}</span>}
                 <span className="flex items-center gap-1"><CheckCircle className="size-3 text-blue-500" /> MGR: {props.mgrUsers.find((u) => u.id === specialMgr)?.name}</span>
               </div>
             )}
@@ -158,9 +221,10 @@ export function AssignForm(props: Props) {
   );
 }
 
-function ReviewerPicker({ label, color, value, onChange, options }: {
-  label: string; color: string; value: string; onChange: (v: string) => void; options: Opt[];
+function ReviewerPicker({ label, color, value, onChange, options, appraiseeId }: {
+  label: string; color: string; value: string; onChange: (v: string) => void; options: Opt[]; appraiseeId: string;
 }) {
+  const selectedName = options.find((o) => o.id === value)?.name;
   return (
     <div className="space-y-1.5">
       <Label className="flex items-center gap-1.5">
@@ -169,15 +233,24 @@ function ReviewerPicker({ label, color, value, onChange, options }: {
       </Label>
       <Select value={value} onValueChange={(v) => onChange(v ?? "")}>
         <SelectTrigger className="w-full">
-          <SelectValue placeholder={`Select ${label}`} />
+          {selectedName ? (
+            <span>{selectedName}</span>
+          ) : (
+            <SelectValue placeholder={`Select ${label}`} />
+          )}
         </SelectTrigger>
         <SelectContent>
           {options.length === 0 && (
             <SelectItem value="__none__" disabled>No users found</SelectItem>
           )}
-          {options.map((o) => (
-            <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
-          ))}
+          {options.map((o) => {
+            const isSelf = o.id === appraiseeId;
+            return (
+              <SelectItem key={o.id} value={o.id} disabled={isSelf} className={isSelf ? "opacity-40" : undefined}>
+                {o.name}{isSelf ? " (appraisee)" : ""}
+              </SelectItem>
+            );
+          })}
         </SelectContent>
       </Select>
     </div>

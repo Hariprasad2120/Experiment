@@ -62,7 +62,7 @@ export function SalaryCalculator({ employees, slabs }: { employees: Employee[]; 
           </CardContent>
         </Card>
         <motion.div
-          key={totals.totalIncrementCost}
+          key={`increment-${totals.totalIncrementCost}`}
           initial={{ scale: 0.95 }}
           animate={{ scale: 1 }}
           transition={{ duration: 0.2 }}
@@ -78,7 +78,7 @@ export function SalaryCalculator({ employees, slabs }: { employees: Employee[]; 
           </Card>
         </motion.div>
         <motion.div
-          key={totals.totalCurrentCost + totals.totalIncrementCost}
+          key={`total-${totals.totalCurrentCost + totals.totalIncrementCost}`}
           initial={{ scale: 0.95 }}
           animate={{ scale: 1 }}
           transition={{ duration: 0.2 }}

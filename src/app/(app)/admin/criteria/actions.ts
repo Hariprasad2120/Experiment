@@ -1,0 +1,59 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+import { prisma } from "@/lib/db";
+import { auth } from "@/lib/auth";
+import { CRITERIA_CATEGORIES } from "@/lib/criteria";
+
+const schema = z.object({
+  categoryName: z.string().min(1),
+  questions: z.array(z.string().min(1)).min(0),
+  maxPoints: z.number().int().min(1).max(500).optional(),
+});
+
+type Result = { ok: true } | { ok: false; error: string };
+
+export async function saveCriteriaOverrideAction(input: z.infer<typeof schema>): Promise<Result> {
+  const session = await auth();
+  if (!session?.user || (session.user.role !== "ADMIN" && session.user.secondaryRole !== "ADMIN")) {
+    return { ok: false, error: "Forbidden" };
+  }
+
+  const parsed = schema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+
+  const cat = CRITERIA_CATEGORIES.find((c) => c.name === parsed.data.categoryName);
+  if (!cat) return { ok: false, error: "Unknown category" };
+
+  await prisma.criteriaOverride.upsert({
+    where: { categoryName: parsed.data.categoryName },
+    create: {
+      categoryName: parsed.data.categoryName,
+      questions: parsed.data.questions,
+      maxPoints: parsed.data.maxPoints ?? null,
+      updatedById: session.user.id,
+    },
+    update: {
+      questions: parsed.data.questions,
+      maxPoints: parsed.data.maxPoints ?? null,
+      updatedById: session.user.id,
+    },
+  });
+
+  revalidatePath("/admin/criteria");
+  revalidatePath("/employee");
+  return { ok: true };
+}
+
+export async function resetCriteriaOverrideAction(categoryName: string): Promise<Result> {
+  const session = await auth();
+  if (!session?.user || (session.user.role !== "ADMIN" && session.user.secondaryRole !== "ADMIN")) {
+    return { ok: false, error: "Forbidden" };
+  }
+
+  await prisma.criteriaOverride.deleteMany({ where: { categoryName } });
+  revalidatePath("/admin/criteria");
+  revalidatePath("/employee");
+  return { ok: true };
+}

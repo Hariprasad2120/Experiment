@@ -6,6 +6,38 @@ import { prisma } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { syncCycleStatus } from "@/lib/workflow";
 
+export async function forceMarkAvailableAction(assignmentId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const session = await auth();
+  if (!session?.user || (session.user.role !== "ADMIN" && session.user.secondaryRole !== "ADMIN")) {
+    return { ok: false, error: "Forbidden" };
+  }
+
+  const assignment = await prisma.cycleAssignment.findUnique({
+    where: { id: assignmentId },
+  });
+  if (!assignment) return { ok: false, error: "Assignment not found" };
+
+  await prisma.cycleAssignment.update({
+    where: { id: assignmentId },
+    data: { availability: "AVAILABLE", availabilitySubmittedAt: new Date() },
+  });
+
+  await prisma.notification.create({
+    data: {
+      userId: assignment.reviewerId,
+      type: "FORCE_AVAILABLE",
+      message: "Admin has marked you as AVAILABLE for an appraisal cycle. Please proceed to rate the employee.",
+      link: `/reviewer/${assignment.cycleId}`,
+      persistent: true,
+    },
+  });
+
+  await syncCycleStatus(assignment.cycleId);
+  revalidatePath(`/admin/employees`);
+  revalidatePath(`/reviewer/${assignment.cycleId}`);
+  return { ok: true };
+}
+
 const schema = z.object({
   assignmentId: z.string(),
   choice: z.enum(["AVAILABLE", "NOT_AVAILABLE"]),
@@ -38,14 +70,25 @@ export async function submitAvailabilityAction(input: z.infer<typeof schema>): P
   });
 
   if (parsed.data.choice === "NOT_AVAILABLE") {
+    // Fetch reviewer name and cycle employee for context
+    const reviewer = await prisma.user.findUnique({
+      where: { id: assignment.reviewerId },
+      select: { name: true },
+    });
+    const cycle = await prisma.appraisalCycle.findUnique({
+      where: { id: assignment.cycleId },
+      include: { user: { select: { name: true } } },
+    });
+
     const admins = await prisma.user.findMany({ where: { role: "ADMIN", active: true } });
     for (const admin of admins) {
       await prisma.notification.create({
         data: {
           userId: admin.id,
-          type: "REASSIGN_NEEDED",
-          message: `Reviewer marked NOT_AVAILABLE for cycle ${assignment.cycleId}`,
-          link: `/admin/cycles/${assignment.cycleId}`,
+          type: "NOT_AVAILABLE_ALERT",
+          message: `${reviewer?.name ?? "A reviewer"} marked NOT AVAILABLE for ${cycle?.user.name ?? "an employee"}'s appraisal. Action required: reassign or force-mark available.`,
+          link: `/admin/employees/${cycle?.userId}/assign`,
+          persistent: true,
         },
       });
     }

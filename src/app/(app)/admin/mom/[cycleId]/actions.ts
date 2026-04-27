@@ -10,7 +10,7 @@ type Result = { ok: true } | { ok: false; error: string };
 
 export async function saveMomAction(input: z.infer<typeof schema>): Promise<Result> {
   const session = await auth();
-  if (!session?.user || session.user.role !== "ADMIN") return { ok: false, error: "Forbidden" };
+  if (!session?.user || (session.user.role !== "ADMIN" && session.user.secondaryRole !== "ADMIN")) return { ok: false, error: "Forbidden" };
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Invalid" };
 

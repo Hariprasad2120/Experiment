@@ -35,14 +35,21 @@ export async function requestExtensionAction(input: z.infer<typeof schema>): Pro
     data: { cycleId, requesterId: session.user.id, reason },
   });
 
+  // Get cycle details for context
+  const cycle = await prisma.appraisalCycle.findUnique({
+    where: { id: cycleId },
+    include: { user: { select: { name: true } } },
+  });
+
   const admins = await prisma.user.findMany({ where: { role: "ADMIN", active: true } });
   for (const admin of admins) {
     await prisma.notification.create({
       data: {
         userId: admin.id,
         type: "EXTENSION_REQUEST",
-        message: `Extension requested for cycle by ${session.user.name ?? "reviewer"}`,
+        message: `${session.user.name ?? "A reviewer"} has requested a time extension (up to 2 business days) to rate ${cycle?.user.name ?? "an employee"}'s appraisal. Reason: "${reason.substring(0, 100)}${reason.length > 100 ? "…" : ""}". Please approve or reject.`,
         link: "/admin/extensions",
+        persistent: true,
       },
     });
   }

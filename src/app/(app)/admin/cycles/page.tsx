@@ -117,13 +117,12 @@ export default async function AdminCyclesPage({
                     <th className="font-medium px-4">Reviewers</th>
                     <th className="font-medium px-4">Avg Score</th>
                     <th className="font-medium px-4">Started</th>
-                    <th className="font-medium px-4">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {cycles.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="py-10 text-center text-slate-400">No cycles found</td>
+                      <td colSpan={7} className="py-10 text-center text-slate-400">No cycles found</td>
                     </tr>
                   )}
                   {cycles.map((c) => {
@@ -134,7 +133,9 @@ export default async function AdminCyclesPage({
                     return (
                       <tr key={c.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
                         <td className="py-3 px-4 font-medium text-slate-900 dark:text-white">
-                          {toTitleCase(c.user.name)}
+                          <Link href={`/admin/employees/${c.userId}/assign`} className="hover:text-[#008993] transition-colors">
+                            {toTitleCase(c.user.name)}
+                          </Link>
                         </td>
                         <td className="px-4 text-slate-500">{c.user.employeeNumber ?? "—"}</td>
                         <td className="px-4">
@@ -154,14 +155,6 @@ export default async function AdminCyclesPage({
                         </td>
                         <td className="px-4 font-medium text-slate-700 dark:text-slate-300">{avg}</td>
                         <td className="px-4 text-slate-500">{c.startDate?.toLocaleDateString() ?? "—"}</td>
-                        <td className="px-4">
-                          <Link
-                            href={`/admin/employees/${c.userId}/assign`}
-                            className="text-xs text-blue-600 hover:text-blue-700 font-medium"
-                          >
-                            Manage
-                          </Link>
-                        </td>
                       </tr>
                     );
                   })}

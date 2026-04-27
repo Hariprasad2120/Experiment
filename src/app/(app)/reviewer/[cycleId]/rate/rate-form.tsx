@@ -6,41 +6,115 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { submitRatingAction } from "./actions";
-import { motion, AnimatePresence } from "motion/react";
+import { motion } from "motion/react";
 import { Info } from "lucide-react";
+import type { CriteriaCategory } from "@/lib/criteria";
+import { TOTAL_MAX_POINTS, GRADE_BANDS } from "@/lib/criteria";
+import { TrendingUp, AlertCircle } from "lucide-react";
 
 type Score = number | "AVERAGE_OUT";
+
+type Slab = {
+  id: string;
+  label: string;
+  grade: string;
+  minRating: number;
+  maxRating: number;
+  hikePercent: number;
+  salaryTier: string;
+};
 
 export function RateForm({
   cycleId,
   role,
-  criteria,
+  categories,
   peerRatingExists,
+  slabs,
+  grossAnnum,
+  employeeSalaryTier,
 }: {
   cycleId: string;
   role: "HR" | "TL" | "MANAGER";
-  criteria: string[];
+  categories: CriteriaCategory[];
   peerRatingExists: boolean;
+  slabs?: Slab[];
+  grossAnnum?: number | null;
+  employeeSalaryTier?: string | null;
 }) {
   const [scores, setScores] = useState<Record<string, Score>>(
-    Object.fromEntries(criteria.map((c) => [c, 3])),
+    Object.fromEntries(categories.map((c) => [c.name, 0])),
   );
-  const [comments, setComments] = useState("");
+  const [catComments, setCatComments] = useState<Record<string, string>>(
+    Object.fromEntries(categories.map((c) => [c.name, ""])),
+  );
+  const [overallComments, setOverallComments] = useState("");
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
   const isTL = role === "TL";
 
-  function setScore(criterion: string, value: Score) {
+  function setScore(name: string, value: Score) {
     if (value === "AVERAGE_OUT") {
       if (isTL) { toast.error("TLs cannot use Average Out"); return; }
-      if (!peerRatingExists) { toast.error("Average Out requires at least one peer to have already rated this item"); return; }
+      if (!peerRatingExists) {
+        toast.error("Average Out requires at least one peer to have already rated");
+        return;
+      }
     }
-    setScores((prev) => ({ ...prev, [criterion]: value }));
+    setScores((prev) => ({ ...prev, [name]: value }));
   }
 
+  function setCatComment(name: string, value: string) {
+    setCatComments((prev) => ({ ...prev, [name]: value }));
+  }
+
+  const totalRaw = categories.reduce((s, c) => {
+    const v = scores[c.name];
+    return s + (v === "AVERAGE_OUT" ? 0 : (v as number));
+  }, 0);
+  const normalizedScore = (totalRaw / TOTAL_MAX_POINTS) * 100;
+  const normalizedPreview = normalizedScore.toFixed(1);
+
+  // Dynamic slab lookup based on current score
+  const matchedSlab = slabs && employeeSalaryTier
+    ? slabs.find(
+        (s) =>
+          normalizedScore >= s.minRating &&
+          normalizedScore <= s.maxRating &&
+          (s.salaryTier === employeeSalaryTier || s.salaryTier === "ALL"),
+      ) ?? null
+    : null;
+
+  const currentGrade = GRADE_BANDS.find(
+    (b) => normalizedScore >= b.minNormalized && normalizedScore <= b.maxNormalized,
+  ) ?? null;
+
+  const hikeAmount =
+    matchedSlab && grossAnnum
+      ? Math.round((grossAnnum * matchedSlab.hikePercent) / 100)
+      : null;
+
+  const gradeColorMap: Record<string, string> = {
+    "A+": "text-emerald-600 bg-emerald-50 border-emerald-200",
+    "A": "text-green-600 bg-green-50 border-green-200",
+    "B+": "text-blue-600 bg-blue-50 border-blue-200",
+    "B": "text-sky-600 bg-sky-50 border-sky-200",
+    "C+": "text-yellow-600 bg-yellow-50 border-yellow-200",
+    "C": "text-orange-600 bg-orange-50 border-orange-200",
+    "D": "text-red-600 bg-red-50 border-red-200",
+  };
+
   function submit() {
-    if (!comments.trim()) { toast.error("Comments are required"); return; }
+    if (!overallComments.trim()) {
+      toast.error("Overall comments are required");
+      return;
+    }
+    for (const cat of categories) {
+      if (!catComments[cat.name]?.trim()) {
+        toast.error(`Add comment for: ${cat.name}`);
+        return;
+      }
+    }
     const hasAO = Object.values(scores).some((s) => s === "AVERAGE_OUT");
     if (hasAO && !peerRatingExists) {
       toast.error("Cannot use Average Out — no peer has rated yet");
@@ -50,7 +124,23 @@ export function RateForm({
       const numericScores = Object.fromEntries(
         Object.entries(scores).map(([k, v]) => [k, v === "AVERAGE_OUT" ? -1 : v]),
       );
-      const res = await submitRatingAction({ cycleId, role, scores: numericScores, comments, hasAverageOut: hasAO });
+      // Merge per-category comments into the overall comments payload
+      const fullComments = [
+        overallComments,
+        ...categories.map((c) =>
+          catComments[c.name]?.trim()
+            ? `[${c.name}]: ${catComments[c.name].trim()}`
+            : null,
+        ).filter(Boolean),
+      ].join("\n\n");
+
+      const res = await submitRatingAction({
+        cycleId,
+        role,
+        scores: numericScores,
+        comments: fullComments,
+        hasAverageOut: hasAO,
+      });
       if (!res.ok) { toast.error(res.error); return; }
       toast.success("Rating submitted — thank you!");
       router.push(`/reviewer/${cycleId}`);
@@ -59,78 +149,155 @@ export function RateForm({
   }
 
   return (
-    <div className="space-y-8">
-      <div className="space-y-5">
-        {criteria.map((c, idx) => {
-          const score = scores[c];
-          const isAO = score === "AVERAGE_OUT";
-          return (
-            <motion.div
-              key={c}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: idx * 0.05 }}
-              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3"
-            >
-              <div className="flex items-center justify-between">
-                <label className="text-sm font-semibold text-slate-900 dark:text-white">{c}</label>
-                <div className="flex items-center gap-3">
-                  {!isTL && peerRatingExists && (
-                    <button
-                      type="button"
-                      onClick={() => setScore(c, isAO ? 3 : "AVERAGE_OUT")}
-                      className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                        isAO
-                          ? "bg-amber-100 text-amber-700 border-amber-300"
-                          : "text-slate-400 border-slate-200 hover:border-amber-300 hover:text-amber-600"
-                      }`}
-                    >
-                      {isAO ? "✓ Averaged Out" : "Average Out"}
-                    </button>
-                  )}
-                  {!isAO && (
-                    <span className="text-lg font-bold text-slate-700 dark:text-slate-200 w-6 text-center">
-                      {score}
-                    </span>
-                  )}
-                </div>
-              </div>
+    <div className="space-y-4">
+      {/* Score preview header */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+            Your Rating
+          </span>
+          <div className="text-right">
+            <div className="text-2xl font-bold text-[#008993]">{normalizedPreview}</div>
+            <div className="text-[10px] text-slate-400">/ 100 normalised</div>
+          </div>
+        </div>
+        <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+          <div
+            className="h-full rounded-full bg-[#008993] transition-all duration-300"
+            style={{ width: `${Math.min(parseFloat(normalizedPreview), 100)}%` }}
+          />
+        </div>
+        <div className="text-[10px] text-slate-400 text-right">
+          Raw: {totalRaw} / {TOTAL_MAX_POINTS} pts
+        </div>
 
-              {!isAO && (
-                <>
-                  <input
-                    type="range"
-                    min={1}
-                    max={5}
-                    step={1}
-                    value={score as number}
-                    onChange={(e) => setScore(c, Number(e.target.value))}
-                    className="w-full accent-blue-600 h-2"
-                  />
-                  <div className="flex justify-between text-[10px] text-slate-400">
-                    {[1, 2, 3, 4, 5].map((n) => (
-                      <span key={n} className={score === n ? "text-blue-600 font-bold" : ""}>{n}</span>
-                    ))}
+        {/* Dynamic slab feedback */}
+        {currentGrade && (
+          <div className={`rounded-lg border px-3 py-2 flex items-center justify-between gap-3 ${gradeColorMap[currentGrade.grade] ?? "bg-slate-50 border-slate-200 text-slate-600"}`}>
+            <div className="flex items-center gap-2">
+              <span className="text-base font-black">{currentGrade.grade}</span>
+              <div>
+                <div className="text-xs font-semibold leading-tight">{currentGrade.label}</div>
+                <div className="text-[10px] opacity-70">Score {currentGrade.minNormalized}–{currentGrade.maxNormalized}</div>
+              </div>
+            </div>
+            {matchedSlab ? (
+              <div className="text-right">
+                <div className="flex items-center gap-1 justify-end">
+                  <TrendingUp className="size-3" />
+                  <span className="text-sm font-bold">{matchedSlab.hikePercent}% hike</span>
+                </div>
+                {hikeAmount !== null && (
+                  <div className="text-[10px] opacity-70 mt-0.5">
+                    +₹{hikeAmount.toLocaleString("en-IN")}/yr
                   </div>
-                </>
-              )}
-              {isAO && (
-                <p className="text-xs text-amber-600 bg-amber-50 dark:bg-amber-950/30 rounded-lg p-2">
-                  Will be averaged with peer scores after all reviewers submit.
-                </p>
-              )}
-            </motion.div>
-          );
-        })}
+                )}
+                <div className="text-[9px] opacity-60 mt-0.5">{matchedSlab.label}</div>
+              </div>
+            ) : slabs && slabs.length > 0 ? (
+              <div className="flex items-center gap-1 text-[10px] opacity-70">
+                <AlertCircle className="size-3" />
+                No slab match
+              </div>
+            ) : null}
+          </div>
+        )}
       </div>
 
+      {/* Per-category cards */}
+      {categories.map((cat, idx) => {
+        const score = scores[cat.name];
+        const isAO = score === "AVERAGE_OUT";
+
+        return (
+          <motion.div
+            key={cat.name}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: idx * 0.03 }}
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3"
+          >
+            {/* Header */}
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="font-semibold text-sm text-slate-900 dark:text-white">
+                  {cat.name}
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5">{cat.items.join(" · ")}</div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {!isTL && peerRatingExists && (
+                  <button
+                    type="button"
+                    onClick={() => setScore(cat.name, isAO ? 0 : "AVERAGE_OUT")}
+                    className={`text-[10px] px-2 py-1 rounded-full border transition-colors ${
+                      isAO
+                        ? "bg-amber-100 text-amber-700 border-amber-300"
+                        : "text-slate-400 border-slate-200 hover:border-amber-300 hover:text-amber-600"
+                    }`}
+                  >
+                    {isAO ? "✓ Avg Out" : "Avg Out"}
+                  </button>
+                )}
+                {!isAO && (
+                  <span className="text-sm font-bold text-slate-700 dark:text-slate-200 min-w-[3.5rem] text-right">
+                    {score as number} / {cat.maxPoints}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Slider */}
+            {!isAO ? (
+              <div className="space-y-1">
+                <input
+                  type="range"
+                  min={0}
+                  max={cat.maxPoints}
+                  step={0.5}
+                  value={score as number}
+                  onChange={(e) => setScore(cat.name, Number(e.target.value))}
+                  className="w-full accent-[#008993] h-2"
+                />
+                <div className="flex justify-between text-[9px] text-slate-400">
+                  <span>0</span>
+                  <span>{Math.round(cat.maxPoints / 2)}</span>
+                  <span>{cat.maxPoints}</span>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-amber-600 bg-amber-50 dark:bg-amber-950/30 rounded-lg p-2">
+                Will be averaged with peer scores after all reviewers submit.
+              </p>
+            )}
+
+            {/* Per-category comment */}
+            <div className="space-y-1">
+              <label className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
+                Comment for this criterion
+              </label>
+              <Textarea
+                value={catComments[cat.name] ?? ""}
+                onChange={(e) => setCatComment(cat.name, e.target.value)}
+                rows={2}
+                placeholder={`Observations on ${cat.name.toLowerCase()}...`}
+                className="resize-none text-xs"
+              />
+            </div>
+          </motion.div>
+        );
+      })}
+
+      {/* Overall comments */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-2">
-        <label className="text-sm font-semibold text-slate-900 dark:text-white">Comments</label>
+        <label className="text-sm font-semibold text-slate-900 dark:text-white">
+          Overall Assessment
+        </label>
         <Textarea
-          value={comments}
-          onChange={(e) => setComments(e.target.value)}
+          value={overallComments}
+          onChange={(e) => setOverallComments(e.target.value)}
           rows={4}
-          placeholder="Add your overall assessment and feedback..."
+          placeholder="Overall observations, strengths, areas for improvement..."
           className="resize-none"
         />
       </div>
@@ -146,7 +313,7 @@ export function RateForm({
         {pending ? "Submitting..." : "Submit Rating"}
       </Button>
       <p className="text-xs text-slate-400 text-center">
-        Ratings are locked after submission. You may add post-submission comments later.
+        Ratings are locked after submission.
       </p>
     </div>
   );

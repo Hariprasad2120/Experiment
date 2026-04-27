@@ -71,7 +71,7 @@ const basicSchema = z.object({
 
 async function requireAdmin() {
   const session = await auth();
-  if (!session?.user || session.user.role !== "ADMIN") throw new Error("Forbidden");
+  if (!session?.user || (session.user.role !== "ADMIN" && session.user.secondaryRole !== "ADMIN")) throw new Error("Forbidden");
   return session;
 }
 
@@ -226,4 +226,14 @@ export async function deleteSalaryAction(formData: FormData) {
   await prisma.employeeSalary.deleteMany({ where: { userId } });
   revalidatePath(`/admin/employees/${userId}`);
   redirect(`/admin/employees/${userId}`);
+}
+
+export async function toggleActiveAction(formData: FormData) {
+  await requireAdmin();
+  const id = formData.get("id") as string;
+  const active = formData.get("active") === "true";
+  if (!id) throw new Error("Missing id");
+  await prisma.user.update({ where: { id }, data: { active: !active } });
+  revalidatePath(`/admin/employees/${id}`);
+  revalidatePath("/admin/employees");
 }

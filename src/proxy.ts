@@ -23,15 +23,17 @@ export default async function proxy(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  const { role, secondaryRole } = session.user;
+
   if (pathname === "/" || pathname === "/dashboard") {
     const url = request.nextUrl.clone();
-    url.pathname = ROLE_HOME[session.user.role];
+    url.pathname = ROLE_HOME[role];
     return NextResponse.redirect(url);
   }
 
-  if (!canAccessPath(session.user.role, pathname)) {
+  if (!canAccessPath(role, pathname, secondaryRole)) {
     const url = request.nextUrl.clone();
-    url.pathname = ROLE_HOME[session.user.role];
+    url.pathname = ROLE_HOME[role];
     return NextResponse.redirect(url);
   }
 

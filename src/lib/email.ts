@@ -1,9 +1,3 @@
-import { Resend } from "resend";
-
-const apiKey = process.env.RESEND_API_KEY;
-const from = process.env.EMAIL_FROM ?? "no-reply@example.com";
-const resend = apiKey ? new Resend(apiKey) : null;
-
 type SendArgs = {
   to: string | string[];
   subject: string;
@@ -11,12 +5,9 @@ type SendArgs = {
 };
 
 export async function sendEmail({ to, subject, html }: SendArgs) {
-  if (!resend) {
-    console.log("[email:stub]", { to, subject });
-    console.log(html);
-    return { stubbed: true };
-  }
-  return resend.emails.send({ from, to, subject, html });
+  console.log("[email]", { to, subject });
+  console.log(html);
+  return { stubbed: true };
 }
 
 export function assignmentEmail(params: {

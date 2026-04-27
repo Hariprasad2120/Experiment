@@ -13,7 +13,7 @@ export async function decideExtensionAction(
   decision: "APPROVED" | "REJECTED",
 ): Promise<Result> {
   const session = await auth();
-  if (!session?.user || session.user.role !== "ADMIN") return { ok: false, error: "Forbidden" };
+  if (!session?.user || (session.user.role !== "ADMIN" && session.user.secondaryRole !== "ADMIN")) return { ok: false, error: "Forbidden" };
 
   const ext = await prisma.extensionRequest.findUnique({
     where: { id: extensionId },
@@ -38,8 +38,11 @@ export async function decideExtensionAction(
     data: {
       userId: ext.requesterId,
       type: "EXTENSION_DECISION",
-      message: `Your extension request was ${decision.toLowerCase()}`,
-      link: `/reviewer/${ext.cycleId}`,
+      message: decision === "APPROVED"
+        ? `Your extension request has been APPROVED. You have 2 additional business days to submit your rating.`
+        : `Your extension request has been REJECTED. Please submit your rating immediately.`,
+      link: `/reviewer/${ext.cycleId}/rate`,
+      persistent: true,
     },
   });
 

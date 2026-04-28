@@ -8,15 +8,21 @@ import { LogOut, Bell } from "lucide-react";
 import { SidebarNav } from "@/components/sidebar-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { PersistentPopup } from "@/components/persistent-popup";
+import { MobileNav } from "@/components/mobile-nav";
 
 const roleColors: Record<Role, string> = {
-  ADMIN: "bg-[#ff8333]/15 text-[#ff8333]",
-  MANAGEMENT: "bg-[#ffaa2d]/15 text-[#ffaa2d]",
-  MANAGER: "bg-[#008993]/15 text-[#00cec4]",
-  HR: "bg-[#00cec4]/15 text-[#00cec4]",
-  TL: "bg-[#ffaa2d]/15 text-[#ffaa2d]",
-  EMPLOYEE: "bg-black/8 dark:bg-white/8 text-[#aaa]",
-  PARTNER: "bg-[#008993]/15 text-[#008993]",
+  ADMIN:
+    "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
+  MANAGEMENT:
+    "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+  MANAGER:
+    "bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400",
+  HR: "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400",
+  TL: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+  EMPLOYEE:
+    "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400",
+  PARTNER:
+    "bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400",
 };
 
 export async function AppShell({ children }: { children: React.ReactNode }) {
@@ -31,47 +37,52 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
   const persistentNotifications = await prisma.notification.findMany({
     where: { userId: id, persistent: true, dismissed: false },
     orderBy: { createdAt: "asc" },
-    select: { id: true, type: true, message: true, link: true, createdAt: true },
+    select: {
+      id: true,
+      type: true,
+      message: true,
+      link: true,
+      createdAt: true,
+    },
   });
 
   const initial = name?.charAt(0)?.toUpperCase() ?? "?";
 
   return (
     <div className="min-h-screen flex bg-background">
-      {/* Sidebar */}
-      <aside className="w-60 shrink-0 border-r border-border bg-sidebar flex flex-col sticky top-0 h-screen overflow-hidden">
-        {/* Logo area */}
+      {/* ── Desktop sidebar ── */}
+      <aside className="hidden md:flex w-64 shrink-0 border-r border-border bg-sidebar flex-col sticky top-0 h-screen overflow-hidden shadow-sm">
+        {/* Logo */}
         <div className="px-5 py-5 border-b border-border">
-          <Link
-            href={ROLE_HOME[role]}
-            className="block group"
-          >
-            <div className="font-bold text-foreground text-base tracking-tight group-hover:text-[#00cec4] transition-colors duration-200">
+          <Link href={ROLE_HOME[role]} className="block group">
+            <div className="font-bold text-foreground text-sm tracking-tight group-hover:text-primary transition-colors duration-200">
               Adarsh Shipping
             </div>
-            <p className="text-[11px] text-muted-foreground mt-0.5 font-medium tracking-wide uppercase">
+            <p className="text-[11px] text-muted-foreground mt-0.5 font-medium tracking-widest uppercase">
               Appraisal Portal
             </p>
           </Link>
         </div>
 
-        {/* Nav — client component with framer motion */}
+        {/* Nav */}
         <SidebarNav role={role} secondaryRole={secondaryRole} />
 
         {/* User footer */}
         <div className="p-4 border-t border-border space-y-3">
           <div className="flex items-center gap-2.5">
             {/* Avatar */}
-            <div className="relative shrink-0">
-              <div className="size-8 rounded-full bg-gradient-to-br from-[#008993] to-[#00cec4] flex items-center justify-center text-xs font-bold text-white shadow-[0_0_12px_rgba(0,137,147,0.4)]">
-                {initial}
-              </div>
+            <div className="size-8 rounded-full bg-gradient-to-br from-primary to-[#00cec4] flex items-center justify-center text-xs font-bold text-white shrink-0 shadow-sm">
+              {initial}
             </div>
 
             {/* Name + role */}
             <div className="min-w-0 flex-1">
-              <div className="text-xs font-semibold text-foreground truncate">{name}</div>
-              <span className={`inline-block mt-0.5 text-[10px] px-1.5 py-0.5 rounded font-medium ${roleColors[role]}`}>
+              <div className="text-xs font-semibold text-foreground truncate">
+                {name}
+              </div>
+              <span
+                className={`inline-block mt-0.5 text-[10px] px-1.5 py-0.5 rounded font-medium ${roleColors[role]}`}
+              >
                 {role}
               </span>
             </div>
@@ -82,8 +93,8 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
             {/* Notification bell */}
             {unread > 0 && (
               <Link href="/notifications" className="relative shrink-0 group">
-                <Bell className="size-4 text-muted-foreground group-hover:text-[#ffaa2d] transition-colors duration-200" />
-                <span className="absolute -top-1.5 -right-1.5 size-3.5 bg-[#ffaa2d] rounded-full text-[8px] text-black flex items-center justify-center font-bold leading-none">
+                <Bell className="size-4 text-muted-foreground group-hover:text-amber-500 transition-colors duration-200" />
+                <span className="absolute -top-1.5 -right-1.5 size-3.5 bg-amber-500 rounded-full text-[8px] text-white flex items-center justify-center font-bold leading-none">
                   {unread > 9 ? "9+" : unread}
                 </span>
               </Link>
@@ -100,7 +111,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
               type="submit"
               variant="outline"
               size="sm"
-              className="w-full text-xs h-8"
+              className="w-full text-xs h-8 text-muted-foreground hover:text-foreground"
             >
               <LogOut className="size-3 mr-1.5" />
               Sign out
@@ -109,10 +120,45 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      {/* Main content */}
-      <main className="flex-1 p-6 overflow-auto min-h-screen">{children}</main>
+      {/* ── Mobile layout ── */}
+      <div className="flex-1 flex flex-col min-h-screen min-w-0">
+        {/* Mobile top bar */}
+        <header className="md:hidden flex items-center justify-between px-4 py-3 border-b border-border bg-sidebar sticky top-0 z-40 shadow-sm">
+          <Link href={ROLE_HOME[role]} className="block">
+            <div className="font-bold text-foreground text-sm">
+              Adarsh Shipping
+            </div>
+            <div className="text-[10px] text-muted-foreground tracking-widest uppercase">
+              Appraisal Portal
+            </div>
+          </Link>
 
-      {/* Persistent popup notifications — block until dismissed */}
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            {unread > 0 && (
+              <Link href="/notifications" className="relative">
+                <Bell className="size-4 text-muted-foreground" />
+                <span className="absolute -top-1.5 -right-1.5 size-3.5 bg-amber-500 rounded-full text-[8px] text-white flex items-center justify-center font-bold">
+                  {unread > 9 ? "9+" : unread}
+                </span>
+              </Link>
+            )}
+            <MobileNav
+              role={role}
+              secondaryRole={secondaryRole}
+              userName={name ?? ""}
+              userRole={role}
+              userInitial={initial}
+              roleColorClass={roleColors[role]}
+            />
+          </div>
+        </header>
+
+        {/* Main content */}
+        <main className="flex-1 p-4 md:p-6 overflow-auto">{children}</main>
+      </div>
+
+      {/* Persistent popup notifications */}
       <PersistentPopup
         initialNotifications={persistentNotifications.map((n) => ({
           ...n,

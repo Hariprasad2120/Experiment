@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { FadeIn } from "@/components/motion-div";
 import { SalaryCalculator } from "./salary-calculator";
+import { getSalaryTier } from "@/lib/criteria";
 
 export default async function SalaryPage() {
   const [slabs, readyCycles] = await Promise.all([
@@ -21,7 +22,14 @@ export default async function SalaryPage() {
     const avg = c.ratings.length > 0
       ? c.ratings.reduce((s, r) => s + r.averageScore, 0) / c.ratings.length
       : 0;
-    const slab = slabs.find((s) => avg >= s.minRating && avg <= s.maxRating);
+    const grossAnnum = c.user.salary ? Number(c.user.salary.grossAnnum) : 0;
+    const monthlyGross = grossAnnum / 12;
+    const tierKey = getSalaryTier(monthlyGross);
+    const dbTier = tierKey === "upto15k" ? "UPTO_15K" : tierKey === "upto30k" ? "BTW_15K_30K" : "ABOVE_30K";
+    const slab = slabs.find((s) =>
+      avg >= s.minRating && avg <= s.maxRating &&
+      (s.salaryTier === dbTier || s.salaryTier === "ALL")
+    );
     return {
       id: c.id,
       userId: c.user.id,
@@ -30,7 +38,7 @@ export default async function SalaryPage() {
       avgRating: avg,
       hikePercent: slab?.hikePercent ?? 0,
       slabLabel: slab?.label ?? "—",
-      grossAnnum: c.user.salary ? Number(c.user.salary.grossAnnum) : 0,
+      grossAnnum,
       decided: c.status === "DECIDED",
       finalAmount: c.decision ? Number(c.decision.finalAmount) : null,
     };

@@ -50,6 +50,29 @@ export async function submitSelfAction(input: z.infer<typeof schema>): Promise<R
     });
   });
 
+  // Notify reviewers + all admins that self-assessment was submitted
+  const adminUsers = await prisma.user.findMany({
+    where: { role: "ADMIN", active: true },
+    select: { id: true },
+  });
+  const reviewerIds = cycle.assignments.map((a) => a.reviewer.id);
+  const notifyUserIds = [...new Set([...reviewerIds, ...adminUsers.map((u) => u.id)])];
+  const employeeName = cycle.user.name;
+
+  await Promise.all(
+    notifyUserIds.map((userId) =>
+      prisma.notification.create({
+        data: {
+          userId,
+          type: "SELF_ASSESSMENT_SUBMITTED",
+          message: `${employeeName} has submitted their self-assessment.`,
+          link: `/reviewer/${parsed.data.cycleId}`,
+          persistent: true,
+        },
+      })
+    )
+  );
+
   await syncCycleStatus(parsed.data.cycleId);
   revalidatePath("/employee");
   return { ok: true, editableUntil: cycle.self.editableUntil.toISOString() };

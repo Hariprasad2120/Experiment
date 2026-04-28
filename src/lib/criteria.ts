@@ -352,3 +352,36 @@ export function getHikePercent(grade: string, monthlyGross: number): number {
   const tier = getSalaryTier(monthlyGross);
   return row[tier];
 }
+
+/**
+ * Criteria excluded per reviewer role based on the appraisal matrix.
+ * MANAGEMENT: cannot rate Accountability & Attendance, Organisational Contribution & Engagement
+ * HR: cannot rate Client & Stakeholder Satisfaction, Problem-Solving & Crisis Management, Results & Goal Achievement
+ * TL and MANAGER: rate all criteria
+ */
+const ROLE_EXCLUDED_CRITERIA: Record<string, string[]> = {
+  MANAGEMENT: [
+    "Accountability & Attendance",
+    "Organisational Contribution & Engagement",
+  ],
+  HR: [
+    "Client & Stakeholder Satisfaction",
+    "Problem-Solving & Crisis Management",
+    "Results & Goal Achievement",
+  ],
+  TL: [],
+  MANAGER: [],
+};
+
+export function getCriteriaForRole(
+  categories: CriteriaCategory[],
+  role: string,
+): CriteriaCategory[] {
+  const excluded = ROLE_EXCLUDED_CRITERIA[role] ?? [];
+  if (excluded.length === 0) return categories;
+  return categories.filter((c) => !excluded.includes(c.name));
+}
+
+export function getMaxPointsForRole(categories: CriteriaCategory[], role: string): number {
+  return getCriteriaForRole(categories, role).reduce((s, c) => s + c.maxPoints, 0);
+}

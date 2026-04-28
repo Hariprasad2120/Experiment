@@ -14,7 +14,8 @@ import { FadeIn } from "@/components/motion-div";
 import { ExtensionRequestForm } from "./extension-request-form";
 import { PostCommentForm } from "./post-comment-form";
 import { RatingReviewForm } from "./rating-review-form";
-import { CheckCircle, Circle, ChevronRight, Star } from "lucide-react";
+import { RatingDisagreementForm } from "./rating-disagreement-form";
+import { CheckCircle, Circle, ChevronRight, Star, FileText } from "lucide-react";
 import { CRITERIA_CATEGORIES } from "@/lib/criteria";
 
 export default async function ReviewerCycleView({
@@ -54,12 +55,17 @@ export default async function ReviewerCycleView({
   const displayStatus = computeCycleStatus(cycle);
   const myRating = cycle.ratings.find((r) => r.reviewerId === session.user.id);
 
-  const existingReviews = myRating
-    ? await prisma.ratingReview.findMany({
-        where: { ratingId: myRating.id },
-        orderBy: { updatedAt: "desc" },
-      })
-    : [];
+  const [existingReviews, existingDisagreement] = await Promise.all([
+    myRating
+      ? prisma.ratingReview.findMany({
+          where: { ratingId: myRating.id },
+          orderBy: { updatedAt: "desc" },
+        })
+      : Promise.resolve([]),
+    myRating
+      ? prisma.ratingDisagreement.findFirst({ where: { ratingId: myRating.id } })
+      : Promise.resolve(null),
+  ]);
 
   const myCategoryScores = myRating
     ? CRITERIA_CATEGORIES.map((cat) => ({
@@ -73,38 +79,49 @@ export default async function ReviewerCycleView({
     assignment && session.user.role !== "ADMIN"
       ? getVisibleAverageForReviewer(cycle.ratings, session.user.id)
       : cycle.ratings.length > 0
-        ? cycle.ratings.reduce((sum, r) => sum + r.averageScore, 0) / cycle.ratings.length
-        : null;
+      ? cycle.ratings.reduce((sum, r) => sum + r.averageScore, 0) / cycle.ratings.length
+      : null;
 
   return (
-    <div className="space-y-5 max-w-2xl">
+    <div className="space-y-5 max-w-2xl mx-auto">
       <FadeIn>
         <div className="flex items-center gap-3">
-          <Link href="/reviewer" className="text-xs text-slate-400 hover:text-slate-600">
+          <Link
+            href="/reviewer"
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
             ← Back
           </Link>
         </div>
-        <div className="mt-2">
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
+        <div className="mt-3">
+          <h1 className="text-2xl font-bold text-foreground">
             {toTitleCase(cycle.user.name)}
           </h1>
-          <p className="text-slate-500 text-sm mt-1">
+          <p className="text-muted-foreground text-sm mt-1">
             {cycle.type} Cycle · {cycle.user.department ?? "—"}
           </p>
         </div>
       </FadeIn>
 
       <FadeIn delay={0.1}>
-        <Card className="border-0 shadow-sm">
+        <Card className="border border-border shadow-sm bg-card">
           <CardHeader className="pb-2">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-sm text-slate-500 font-normal">Cycle Status</CardTitle>
-              <div className="flex items-center gap-2">
-                <span className="text-xs bg-blue-100 text-blue-700 rounded-full px-2.5 py-0.5 font-medium">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <CardTitle className="text-sm text-muted-foreground font-normal flex items-center gap-2">
+                Cycle Status
+                {cycle.self && cycle.self.editCount > 0 && (
+                  <span className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                    <FileText className="size-3" />
+                    Self-assessment edited {cycle.self.editCount}×
+                  </span>
+                )}
+              </CardTitle>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs bg-primary/10 text-primary rounded-full px-2.5 py-0.5 font-medium">
                   {displayStatus.replace(/_/g, " ")}
                 </span>
                 {visibleAverage !== null && (
-                  <span className="text-xs bg-green-100 text-green-700 rounded-full px-2.5 py-0.5 font-medium">
+                  <span className="text-xs bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded-full px-2.5 py-0.5 font-medium">
                     Avg: {visibleAverage.toFixed(2)}
                   </span>
                 )}
@@ -113,59 +130,73 @@ export default async function ReviewerCycleView({
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
             {!reviewOpen && (
-              <p className="text-slate-500 text-xs bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
-                Rating unlocks after employee submits self-assessment or the 3-business-day window expires.
+              <p className="text-muted-foreground text-xs bg-muted rounded-xl p-3">
+                Rating unlocks after employee submits self-assessment or the 3-business-day
+                window expires.
               </p>
             )}
             {reviewOpen && !ratingOpen && (
-              <p className="text-slate-500 text-xs bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
+              <p className="text-muted-foreground text-xs bg-muted rounded-xl p-3">
                 Waiting for all assigned reviewers to confirm availability.
               </p>
             )}
 
-            {/* Reviewer progress with inline actions */}
+            {/* Reviewer progress */}
             <div className="space-y-1">
-              <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Reviewer Progress</p>
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+                Reviewer Progress
+              </p>
               {cycle.assignments.map((a) => {
                 const rated = cycle.ratings.find((r) => r.role === a.role);
                 const isMe = assignment?.role === a.role;
                 const canSeeScores = !!myRating || session.user.role === "ADMIN";
 
                 return (
-                  <div key={a.id} className="flex items-center gap-2 py-1 rounded-lg px-2 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                  <div
+                    key={a.id}
+                    className="flex items-center gap-2 py-1.5 rounded-xl px-2 hover:bg-muted/60 transition-colors"
+                  >
                     {rated ? (
                       <CheckCircle className="size-4 text-green-500 shrink-0" />
                     ) : (
-                      <Circle className="size-4 text-slate-300 shrink-0" />
+                      <Circle className="size-4 text-border shrink-0" />
                     )}
-                    <span className="text-xs font-medium text-slate-700 dark:text-slate-300 w-16">{a.role}</span>
-                    <span className="text-xs text-slate-500 flex-1">{toTitleCase(a.reviewer.name)}</span>
+                    <span className="text-xs font-medium text-foreground w-16">{a.role}</span>
+                    <span className="text-xs text-muted-foreground flex-1">
+                      {toTitleCase(a.reviewer.name)}
+                    </span>
                     {rated && canSeeScores && (
-                      <span className="text-xs text-green-600 font-medium">{rated.averageScore.toFixed(2)}</span>
+                      <span className="text-xs text-green-600 dark:text-green-400 font-medium">
+                        {rated.averageScore.toFixed(2)}
+                      </span>
                     )}
                     {rated && !canSeeScores && (
-                      <span className="text-[10px] text-slate-400 italic">Submit yours to see</span>
+                      <span className="text-[10px] text-muted-foreground italic">
+                        Submit yours to see
+                      </span>
                     )}
-                    {/* Inline availability action for this reviewer */}
                     {isMe && assignment?.availability === "PENDING" && (
                       <Link
                         href={`/reviewer/${cycleId}/availability`}
-                        className="flex items-center gap-0.5 text-[10px] font-medium text-amber-600 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-md px-2 py-0.5 transition-colors"
+                        className="flex items-center gap-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 hover:bg-amber-100 dark:hover:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-lg px-2 py-0.5 transition-colors"
                       >
                         Set availability <ChevronRight className="size-3" />
                       </Link>
                     )}
-                    {/* Inline rate action */}
-                    {isMe && assignment?.availability === "AVAILABLE" && ratingOpen && !myRating && (
-                      <Link
-                        href={`/reviewer/${cycleId}/rate`}
-                        className="flex items-center gap-0.5 text-[10px] font-medium text-[#008993] bg-[#008993]/10 hover:bg-[#008993]/20 border border-[#008993]/20 rounded-md px-2 py-0.5 transition-colors"
-                      >
-                        <Star className="size-3" /> Rate <ChevronRight className="size-3" />
-                      </Link>
-                    )}
+                    {isMe &&
+                      assignment?.availability === "AVAILABLE" &&
+                      ratingOpen &&
+                      !myRating && (
+                        <Link
+                          href={`/reviewer/${cycleId}/rate`}
+                          className="flex items-center gap-0.5 text-[10px] font-medium text-primary bg-primary/10 hover:bg-primary/20 border border-primary/20 rounded-lg px-2 py-0.5 transition-colors"
+                        >
+                          <Star className="size-3" /> Rate{" "}
+                          <ChevronRight className="size-3" />
+                        </Link>
+                      )}
                     {isMe && myRating && (
-                      <span className="text-[10px] text-green-600 font-medium bg-green-50 rounded-md px-2 py-0.5">
+                      <span className="text-[10px] text-green-600 dark:text-green-400 font-medium bg-green-50 dark:bg-green-900/20 rounded-lg px-2 py-0.5">
                         ✓ Submitted
                       </span>
                     )}
@@ -199,6 +230,27 @@ export default async function ReviewerCycleView({
         </FadeIn>
       )}
 
+      {myRating && myCategoryScores.length > 0 && (
+        <FadeIn delay={0.4}>
+          <RatingDisagreementForm
+            ratingId={myRating.id}
+            cycleId={cycleId}
+            categoryScores={myCategoryScores}
+            existing={
+              existingDisagreement
+                ? {
+                    evaluation: existingDisagreement.evaluation as "ACCURATE" | "OVERRATED" | "UNDERRATED",
+                    comment: existingDisagreement.comment,
+                    revisedScores: existingDisagreement.revisedScores as Record<string, number> | null,
+                    ceilingMin: existingDisagreement.ceilingMin ? Number(existingDisagreement.ceilingMin) : null,
+                    ceilingMax: existingDisagreement.ceilingMax ? Number(existingDisagreement.ceilingMax) : null,
+                  }
+                : null
+            }
+          />
+        </FadeIn>
+      )}
+
       {assignment && !myRating && ratingOpen && !existingExtension && (
         <FadeIn delay={0.3}>
           <ExtensionRequestForm cycleId={cycleId} />
@@ -207,7 +259,7 @@ export default async function ReviewerCycleView({
 
       {existingExtension && (
         <FadeIn delay={0.3}>
-          <div className="text-sm text-amber-600 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
+          <div className="text-sm text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl p-3">
             Extension request pending admin approval.
           </div>
         </FadeIn>

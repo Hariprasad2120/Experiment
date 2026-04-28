@@ -35,6 +35,9 @@ async function createOrReuseAssignments(
   employee: { name: string },
   loginUrl: string,
 ) {
+  // Track which reviewers are new or updated (only they get notified)
+  const notifyIds: string[] = [];
+
   await prisma.$transaction(async (tx) => {
     for (const a of assignments) {
       const existing = await tx.cycleAssignment.findUnique({
@@ -61,7 +64,10 @@ async function createOrReuseAssignments(
               availabilitySubmittedAt: null,
             },
           });
+          // Only the new reviewer gets notified
+          notifyIds.push(a.reviewerId);
         }
+        // Unchanged assignments: no notification
       } else {
         await tx.cycleAssignment.create({
           data: {
@@ -71,12 +77,15 @@ async function createOrReuseAssignments(
             assignedById: actorId,
           },
         });
+        // New assignment: notify
+        notifyIds.push(a.reviewerId);
       }
     }
   });
 
-  const reviewerIds = assignments.map((a) => a.reviewerId);
-  const reviewers = await prisma.user.findMany({ where: { id: { in: reviewerIds } } });
+  if (notifyIds.length === 0) return;
+
+  const reviewers = await prisma.user.findMany({ where: { id: { in: notifyIds } } });
   const roleByReviewer = new Map(assignments.map((a) => [a.reviewerId, a.role]));
 
   for (const r of reviewers) {
@@ -212,6 +221,46 @@ export async function startSpecialAppraisalAction(input: z.infer<typeof specialS
 
   revalidatePath(`/admin/employees/${employeeId}/assign`);
   revalidatePath("/admin");
+  return { ok: true };
+}
+
+export async function forceMarkAvailableAction(assignmentId: string): Promise<Result> {
+  const session = await auth();
+  if (!session?.user || (session.user.role !== "ADMIN" && session.user.secondaryRole !== "ADMIN")) return { ok: false, error: "Forbidden" };
+
+  const assignment = await prisma.cycleAssignment.findUnique({
+    where: { id: assignmentId },
+    include: { reviewer: { select: { name: true } }, cycle: { include: { user: { select: { name: true } } } } },
+  });
+  if (!assignment) return { ok: false, error: "Assignment not found" };
+
+  await prisma.$transaction(async (tx) => {
+    await tx.cycleAssignment.update({
+      where: { id: assignmentId },
+      data: { availability: "AVAILABLE", availabilitySubmittedAt: new Date() },
+    });
+    await tx.auditLog.create({
+      data: {
+        cycleId: assignment.cycleId,
+        actorId: session.user.id,
+        action: "FORCE_MARK_AVAILABLE",
+        after: { assignmentId, reviewerId: assignment.reviewerId, role: assignment.role },
+      },
+    });
+    await tx.notification.create({
+      data: {
+        userId: assignment.reviewerId,
+        type: "FORCE_MARKED_AVAILABLE",
+        message: `You have been force-marked as AVAILABLE for ${assignment.cycle.user.name}'s appraisal by admin. Please proceed to rate.`,
+        link: `/reviewer/${assignment.cycleId}`,
+        persistent: true,
+      },
+    });
+  });
+
+  await syncCycleStatus(assignment.cycleId);
+  revalidatePath(`/admin/employees/${assignment.cycle.userId}/assign`);
+  revalidatePath(`/reviewer/${assignment.cycleId}`);
   return { ok: true };
 }
 

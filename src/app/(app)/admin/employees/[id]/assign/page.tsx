@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AssignForm } from "./assign-form";
 import { DemoControls } from "./demo-controls";
+import { ForceAvailableButton } from "./force-available-button";
 import { toTitleCase } from "@/lib/utils";
 import { FadeIn } from "@/components/motion-div";
 import { getAppraisalEligibility, autoCycleType } from "@/lib/appraisal-eligibility";
@@ -86,7 +87,7 @@ export default async function AssignPage({ params }: { params: Promise<{ id: str
               <div className="text-xs text-slate-400 flex items-center gap-1 mb-0.5">
                 <Calendar className="size-3" /> Joining Date
               </div>
-              <div className="font-medium">{employee.joiningDate.toLocaleDateString()}</div>
+              <div className="font-medium">{employee.joiningDate.toLocaleDateString("en-IN")}</div>
             </div>
             <div>
               <div className="text-xs text-slate-400 mb-0.5">Tenure</div>
@@ -144,7 +145,7 @@ export default async function AssignPage({ params }: { params: Promise<{ id: str
                       ? "bg-red-100 text-red-700"
                       : "bg-amber-100 text-amber-700"
                   }`}>
-                    {selfSubmitted ? "Submitted" : selfDeadlinePassed ? "Deadline passed" : `Due ${existingCycle.self?.editableUntil.toLocaleDateString()}`}
+                    {selfSubmitted ? "Submitted" : selfDeadlinePassed ? "Deadline passed" : `Due ${existingCycle.self?.editableUntil.toLocaleDateString("en-IN")}`}
                   </span>
                 </div>
               </div>
@@ -192,6 +193,11 @@ export default async function AssignPage({ params }: { params: Promise<{ id: str
                         }`}>
                           {rating ? `Rated ${rating.averageScore.toFixed(1)}` : "Not Rated"}
                         </span>
+
+                        {/* Force available action for NOT_AVAILABLE reviewers */}
+                        {a.availability === "NOT_AVAILABLE" && (
+                          <ForceAvailableButton assignmentId={a.id} />
+                        )}
                       </div>
                     );
                   })}

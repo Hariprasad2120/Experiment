@@ -70,7 +70,7 @@ function TicketCard({ ticket, currentUserId, isAdmin }: { ticket: Ticket; curren
               <span className="text-[10px] text-slate-400">{ticket.category}</span>
             </div>
             <p className="text-sm font-semibold text-slate-900 dark:text-white">{ticket.title}</p>
-            <p className="text-xs text-slate-400 mt-0.5">{ticket.createdAt.toLocaleString()}</p>
+            <p className="text-xs text-slate-400 mt-0.5" suppressHydrationWarning>{ticket.createdAt.toLocaleString()}</p>
           </div>
           <button
             onClick={() => setExpanded((v) => !v)}
@@ -103,7 +103,7 @@ function TicketCard({ ticket, currentUserId, isAdmin }: { ticket: Ticket; curren
                       <span className={`text-[10px] px-1 rounded ${c.author.role === "ADMIN" ? "text-[#00cec4]" : "text-slate-400"}`}>
                         {c.author.role}
                       </span>
-                      <span className="text-[10px] text-slate-400 ml-auto">{new Date(c.createdAt).toLocaleString()}</span>
+                      <span className="text-[10px] text-slate-400 ml-auto" suppressHydrationWarning>{new Date(c.createdAt).toLocaleString()}</span>
                     </div>
                     <p className="text-slate-700 dark:text-slate-300">{c.message}</p>
                   </div>

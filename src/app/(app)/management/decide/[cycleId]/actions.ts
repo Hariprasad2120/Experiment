@@ -7,10 +7,12 @@ import { auth } from "@/lib/auth";
 
 const schema = z.object({
   cycleId: z.string(),
-  finalRating: z.number().min(0).max(5),
+  finalRating: z.number().min(0).max(100),
+  hikePercent: z.number().min(0).max(100),
   slabId: z.string().optional(),
-  finalAmount: z.number().min(0),
   comments: z.string().optional(),
+  managementScores: z.record(z.string(), z.number()).optional(),
+  managementComment: z.string().optional(),
 });
 
 type Result = { ok: true } | { ok: false; error: string };
@@ -23,17 +25,20 @@ export async function finalizeDecisionAction(input: z.infer<typeof schema>): Pro
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Invalid input" };
 
-  const { cycleId, finalRating, slabId, finalAmount, comments } = parsed.data;
+  const { cycleId, finalRating, hikePercent, slabId, comments, managementScores, managementComment } = parsed.data;
 
   const cycle = await prisma.appraisalCycle.findUnique({
     where: { id: cycleId },
-    include: { ratings: true },
+    include: { ratings: true, user: { include: { salary: true } } },
   });
   if (!cycle) return { ok: false, error: "Cycle not found" };
 
   const avgRating = cycle.ratings.length > 0
     ? cycle.ratings.reduce((s, r) => s + r.averageScore, 0) / cycle.ratings.length
     : 0;
+
+  const grossAnnum = cycle.user.salary ? Number(cycle.user.salary.grossAnnum) : 0;
+  const finalAmount = Math.round(grossAnnum * hikePercent / 100);
 
   await prisma.$transaction(async (tx) => {
     await tx.appraisalDecision.create({
@@ -45,6 +50,8 @@ export async function finalizeDecisionAction(input: z.infer<typeof schema>): Pro
         suggestedAmount: finalAmount,
         finalAmount,
         comments: comments ?? null,
+        managementScores: managementScores ?? undefined,
+        managementComment: managementComment ?? null,
         decidedById: session.user.id,
       },
     });
@@ -58,6 +65,14 @@ export async function finalizeDecisionAction(input: z.infer<typeof schema>): Pro
         type: "APPRAISAL_DECIDED",
         message: "Your appraisal decision has been finalized",
         link: "/employee",
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        cycleId,
+        actorId: session.user.id,
+        action: "APPRAISAL_DECIDED",
+        after: { finalRating, hikePercent, finalAmount, slabId, managementScores },
       },
     });
   });

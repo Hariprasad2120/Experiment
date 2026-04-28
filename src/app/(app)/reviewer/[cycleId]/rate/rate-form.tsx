@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { submitRatingAction } from "./actions";
 import { motion } from "motion/react";
 import { Info } from "lucide-react";
 import type { CriteriaCategory } from "@/lib/criteria";
-import { TOTAL_MAX_POINTS, GRADE_BANDS } from "@/lib/criteria";
+import { GRADE_BANDS } from "@/lib/criteria";
 import { TrendingUp, AlertCircle } from "lucide-react";
 
 type Score = number | "AVERAGE_OUT";
@@ -28,6 +28,7 @@ export function RateForm({
   cycleId,
   role,
   categories,
+  totalMaxPoints,
   peerRatingExists,
   slabs,
   grossAnnum,
@@ -36,6 +37,7 @@ export function RateForm({
   cycleId: string;
   role: "HR" | "TL" | "MANAGER";
   categories: CriteriaCategory[];
+  totalMaxPoints: number;
   peerRatingExists: boolean;
   slabs?: Slab[];
   grossAnnum?: number | null;
@@ -49,7 +51,9 @@ export function RateForm({
   );
   const [overallComments, setOverallComments] = useState("");
   const [pending, startTransition] = useTransition();
+  const [highlightedCriteria, setHighlightedCriteria] = useState<string | null>(null);
   const router = useRouter();
+  const criteriaRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const isTL = role === "TL";
 
@@ -72,7 +76,7 @@ export function RateForm({
     const v = scores[c.name];
     return s + (v === "AVERAGE_OUT" ? 0 : (v as number));
   }, 0);
-  const normalizedScore = (totalRaw / TOTAL_MAX_POINTS) * 100;
+  const normalizedScore = (totalRaw / totalMaxPoints) * 100;
   const normalizedPreview = normalizedScore.toFixed(1);
 
   // Dynamic slab lookup based on current score
@@ -104,14 +108,37 @@ export function RateForm({
     "D": "text-red-600 bg-red-50 border-red-200",
   };
 
+  function scrollToMissed(catName: string) {
+    const el = criteriaRefs.current[catName];
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setHighlightedCriteria(catName);
+      setTimeout(() => setHighlightedCriteria(null), 2500);
+    }
+  }
+
   function submit() {
+    // Check for unrated criteria first
+    for (const cat of categories) {
+      const v = scores[cat.name];
+      if (v !== "AVERAGE_OUT" && (typeof v !== "number" || v === 0)) {
+        toast.error(`Rate criteria: ${cat.name}`, {
+          action: { label: "Go there", onClick: () => scrollToMissed(cat.name) },
+        });
+        scrollToMissed(cat.name);
+        return;
+      }
+    }
     if (!overallComments.trim()) {
       toast.error("Overall comments are required");
       return;
     }
     for (const cat of categories) {
       if (!catComments[cat.name]?.trim()) {
-        toast.error(`Add comment for: ${cat.name}`);
+        toast.error(`Add comment for: ${cat.name}`, {
+          action: { label: "Go there", onClick: () => scrollToMissed(cat.name) },
+        });
+        scrollToMissed(cat.name);
         return;
       }
     }
@@ -148,29 +175,59 @@ export function RateForm({
     });
   }
 
+  const completedCount = categories.filter((c) => {
+    const v = scores[c.name];
+    return v === "AVERAGE_OUT" || (typeof v === "number" && v > 0);
+  }).length;
+  const totalCount = categories.length;
+  const progressPct = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
+
   return (
     <div className="space-y-4">
-      {/* Score preview header */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 space-y-3">
+      {/* Sticky progress bar */}
+      <div className="sticky top-0 z-30 bg-white/95 dark:bg-slate-950/95 backdrop-blur border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 space-y-2 shadow-sm">
         <div className="flex items-center justify-between">
-          <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-            Your Rating
-          </span>
-          <div className="text-right">
-            <div className="text-2xl font-bold text-[#008993]">{normalizedPreview}</div>
-            <div className="text-[10px] text-slate-400">/ 100 normalised</div>
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Your Rating</span>
+            <span className="text-[10px] text-slate-500">{completedCount}/{totalCount} criteria rated</span>
+          </div>
+          <div className="flex items-center gap-3">
+            {currentGrade && (
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${gradeColorMap[currentGrade.grade] ?? "bg-slate-50 border-slate-200 text-slate-600"}`}>
+                {currentGrade.grade} · {currentGrade.label}
+              </span>
+            )}
+            {matchedSlab && (
+              <span className="flex items-center gap-1 text-xs font-bold text-green-600">
+                <TrendingUp className="size-3" />{matchedSlab.hikePercent}%
+              </span>
+            )}
+            <div className="text-right">
+              <div className="text-xl font-bold text-[#008993]">{normalizedPreview}</div>
+              <div className="text-[10px] text-slate-400">/ 100</div>
+            </div>
           </div>
         </div>
-        <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+        <div className="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
           <div
             className="h-full rounded-full bg-[#008993] transition-all duration-300"
             style={{ width: `${Math.min(parseFloat(normalizedPreview), 100)}%` }}
           />
         </div>
-        <div className="text-[10px] text-slate-400 text-right">
-          Raw: {totalRaw} / {TOTAL_MAX_POINTS} pts
+        <div className="h-1 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+          <div
+            className="h-full rounded-full bg-amber-400 transition-all duration-300"
+            style={{ width: `${progressPct}%` }}
+          />
         </div>
+        <div className="flex justify-between text-[10px] text-slate-400">
+          <span>Criteria progress: {completedCount}/{totalCount}</span>
+          <span>Raw: {totalRaw} / {totalMaxPoints} pts</span>
+        </div>
+      </div>
 
+      {/* Full score card (non-sticky reference) */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 space-y-3">
         {/* Dynamic slab feedback */}
         {currentGrade && (
           <div className={`rounded-lg border px-3 py-2 flex items-center justify-between gap-3 ${gradeColorMap[currentGrade.grade] ?? "bg-slate-50 border-slate-200 text-slate-600"}`}>
@@ -208,14 +265,20 @@ export function RateForm({
       {categories.map((cat, idx) => {
         const score = scores[cat.name];
         const isAO = score === "AVERAGE_OUT";
+        const isHighlighted = highlightedCriteria === cat.name;
 
         return (
           <motion.div
             key={cat.name}
+            ref={(el) => { criteriaRefs.current[cat.name] = el; }}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: idx * 0.03 }}
-            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3"
+            className={`bg-white dark:bg-slate-900 border rounded-xl p-4 space-y-3 transition-all duration-500 ${
+              isHighlighted
+                ? "border-amber-400 shadow-lg shadow-amber-100 dark:shadow-amber-900/20 ring-2 ring-amber-300 dark:ring-amber-600"
+                : "border-slate-200 dark:border-slate-700"
+            }`}
           >
             {/* Header */}
             <div className="flex items-start justify-between gap-3">

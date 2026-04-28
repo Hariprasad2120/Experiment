@@ -11,6 +11,7 @@ import {
   GRADE_BANDS,
   HIKE_TABLE,
   getSalaryTier,
+  getCriteriaForRole,
 } from "@/lib/criteria";
 import { getMergedCriteria } from "@/lib/criteria-overrides";
 import {
@@ -56,12 +57,14 @@ export default async function RatePage({
   });
   if (existing) redirect(`/reviewer/${cycleId}`);
 
-  const [peerRatingExistsCount, mergedCategories, allSlabs] = await Promise.all([
+  const [peerRatingExistsCount, allMergedCategories, allSlabs] = await Promise.all([
     prisma.rating.count({ where: { cycleId } }),
     getMergedCriteria(),
     prisma.incrementSlab.findMany({ orderBy: { minRating: "desc" } }),
   ]);
   const peerRatingExists = peerRatingExistsCount > 0;
+  const mergedCategories = getCriteriaForRole(allMergedCategories, assignment.role);
+  const roleMaxPoints = mergedCategories.reduce((s, c) => s + c.maxPoints, 0);
 
   // Salary revisions (last 5)
   const revisions = await prisma.salaryRevision.findMany({
@@ -113,6 +116,12 @@ export default async function RatePage({
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm flex items-center gap-2">
                   <User className="size-4 text-[#008993]" /> Employee Overview
+                  {assignment.cycle.self && (
+                    <span className="ml-auto flex items-center gap-1.5 text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                      <FileText className="size-3" />
+                      Self-assessment edited {assignment.cycle.self.editCount} time{assignment.cycle.self.editCount !== 1 ? "s" : ""}
+                    </span>
+                  )}
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -478,6 +487,7 @@ export default async function RatePage({
               cycleId={cycleId}
               role={assignment.role}
               categories={mergedCategories}
+              totalMaxPoints={roleMaxPoints}
               peerRatingExists={peerRatingExists}
               slabs={allSlabs.map((s) => ({
                 id: s.id,

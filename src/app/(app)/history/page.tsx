@@ -7,15 +7,24 @@ import Link from "next/link";
 import { HistoryFilters } from "./history-filters";
 
 const STATUS_COLORS: Record<string, string> = {
-  DECIDED: "bg-emerald-100 text-emerald-700",
-  CLOSED: "bg-slate-100 text-slate-500",
-  RATINGS_COMPLETE: "bg-green-100 text-green-700",
-  SCHEDULED: "bg-teal-100 text-teal-700",
-  PENDING_SELF: "bg-slate-100 text-slate-600",
-  SELF_SUBMITTED: "bg-blue-100 text-blue-700",
-  RATING_IN_PROGRESS: "bg-orange-100 text-orange-700",
-  AWAITING_AVAILABILITY: "bg-yellow-100 text-yellow-700",
-  DATE_VOTING: "bg-purple-100 text-purple-700",
+  DECIDED:
+    "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
+  CLOSED:
+    "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400",
+  RATINGS_COMPLETE:
+    "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+  SCHEDULED:
+    "bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400",
+  PENDING_SELF:
+    "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400",
+  SELF_SUBMITTED:
+    "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+  RATING_IN_PROGRESS:
+    "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
+  AWAITING_AVAILABILITY:
+    "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
+  DATE_VOTING:
+    "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
 };
 
 export default async function HistoryPage({
@@ -38,10 +47,8 @@ export default async function HistoryPage({
   if (isManagementOrPartner || isAdminRole) {
     // see all
   } else if (isReviewerRole) {
-    // reviewer sees ONLY cycles they were assigned to review
     where.assignments = { some: { reviewerId: session.user.id } };
   } else {
-    // EMPLOYEE sees only own
     where.userId = session.user.id;
   }
 
@@ -61,7 +68,9 @@ export default async function HistoryPage({
   const cycles = await prisma.appraisalCycle.findMany({
     where,
     include: {
-      user: { select: { id: true, name: true, employeeNumber: true, department: true } },
+      user: {
+        select: { id: true, name: true, employeeNumber: true, department: true },
+      },
       decision: { include: { slab: true } },
       ratings: { select: { averageScore: true, role: true, reviewerId: true } },
       assignments: { select: { reviewerId: true, reviewer: { select: { name: true } } } },
@@ -80,13 +89,13 @@ export default async function HistoryPage({
   const canViewCycleDetail = isAdminRole || isManagementOrPartner;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 max-w-7xl mx-auto">
       <FadeIn>
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
+          <h1 className="text-2xl font-bold text-foreground">
             {isReviewerRole ? "My Review History" : "Appraisal History"}
           </h1>
-          <p className="text-slate-500 text-sm mt-1">
+          <p className="text-muted-foreground text-sm mt-1">
             {isReviewerRole
               ? "Appraisals you were assigned to review"
               : `${filtered.length} records`}
@@ -105,16 +114,18 @@ export default async function HistoryPage({
       </FadeIn>
 
       <FadeIn delay={0.12}>
-        <p className="text-xs text-slate-400">{filtered.length} record{filtered.length !== 1 ? "s" : ""}</p>
+        <p className="text-xs text-muted-foreground">
+          {filtered.length} record{filtered.length !== 1 ? "s" : ""}
+        </p>
       </FadeIn>
 
       <FadeIn delay={0.15}>
-        <Card className="border-0 shadow-sm">
+        <Card className="border border-border shadow-sm bg-card">
           <CardContent className="p-0">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm min-w-[640px]">
                 <thead>
-                  <tr className="text-left text-xs text-slate-500 border-b bg-slate-50 dark:bg-slate-800/50">
+                  <tr className="text-left text-xs text-muted-foreground border-b border-border bg-muted/40">
                     <th className="py-3 px-4 font-medium">Employee</th>
                     {(isAdminRole || isManagementOrPartner) && (
                       <th className="px-4 font-medium">Emp #</th>
@@ -130,10 +141,10 @@ export default async function HistoryPage({
                     {canViewCycleDetail && <th className="px-4 font-medium">Detail</th>}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                <tbody className="divide-y divide-border">
                   {filtered.length === 0 && (
                     <tr>
-                      <td colSpan={10} className="py-10 text-center text-slate-400">
+                      <td colSpan={10} className="py-12 text-center text-muted-foreground">
                         No records found
                       </td>
                     </tr>
@@ -141,7 +152,8 @@ export default async function HistoryPage({
                   {filtered.map((c) => {
                     const avg =
                       c.ratings.length > 0
-                        ? c.ratings.reduce((s, r) => s + r.averageScore, 0) / c.ratings.length
+                        ? c.ratings.reduce((s, r) => s + r.averageScore, 0) /
+                          c.ratings.length
                         : null;
                     const myRating = isReviewerRole
                       ? c.ratings.find((r) => r.reviewerId === session.user.id)
@@ -150,13 +162,13 @@ export default async function HistoryPage({
                     return (
                       <tr
                         key={c.id}
-                        className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+                        className="hover:bg-muted/40 transition-colors"
                       >
-                        <td className="py-3 px-4 font-medium text-slate-900 dark:text-white">
+                        <td className="py-3 px-4 font-medium text-foreground">
                           {canViewEmployeeDetail ? (
                             <Link
                               href={`/admin/employees/${c.user.id}`}
-                              className="hover:text-[#008993] transition-colors"
+                              className="hover:text-primary transition-colors"
                             >
                               {toTitleCase(c.user.name)}
                             </Link>
@@ -165,59 +177,69 @@ export default async function HistoryPage({
                           )}
                         </td>
                         {(isAdminRole || isManagementOrPartner) && (
-                          <td className="px-4 text-slate-500">{c.user.employeeNumber ?? "—"}</td>
+                          <td className="px-4 text-muted-foreground">
+                            {c.user.employeeNumber ?? "—"}
+                          </td>
                         )}
                         <td className="px-4">
-                          <span className="text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded px-2 py-0.5">
+                          <span className="text-xs bg-muted text-muted-foreground rounded px-2 py-0.5">
                             {c.type}
                           </span>
                         </td>
-                        <td className="px-4 text-slate-500 whitespace-nowrap">
+                        <td className="px-4 text-muted-foreground whitespace-nowrap">
                           {c.startDate.toLocaleDateString("en-IN")}
                         </td>
                         <td className="px-4">
                           <span
-                            className={`text-xs rounded-full px-2 py-0.5 font-medium ${STATUS_COLORS[c.status] ?? "bg-slate-100 text-slate-600"}`}
+                            className={`text-xs rounded-full px-2 py-0.5 font-medium ${
+                              STATUS_COLORS[c.status] ?? "bg-muted text-muted-foreground"
+                            }`}
                           >
                             {c.status.replace(/_/g, " ")}
                           </span>
                         </td>
-                        <td className="px-4 font-medium text-slate-700 dark:text-slate-300">
+                        <td className="px-4 font-medium text-foreground">
                           {avg !== null ? avg.toFixed(2) : "—"}
                         </td>
                         <td className="px-4">
                           {c.decision?.slab?.grade ? (
-                            <span className="text-xs font-bold text-purple-700 dark:text-purple-300">
+                            <span className="text-xs font-bold text-purple-700 dark:text-purple-400">
                               {c.decision.slab.grade}
                             </span>
-                          ) : "—"}
+                          ) : (
+                            "—"
+                          )}
                         </td>
                         <td className="px-4">
                           {c.decision?.slab ? (
                             <span className="text-xs text-purple-600 dark:text-purple-400">
                               {c.decision.slab.label}
                             </span>
-                          ) : "—"}
+                          ) : (
+                            "—"
+                          )}
                         </td>
-                        <td className="px-4 text-green-600 font-medium whitespace-nowrap">
+                        <td className="px-4 text-green-600 dark:text-green-400 font-medium whitespace-nowrap">
                           {c.decision
                             ? `+₹${Number(c.decision.finalAmount).toLocaleString("en-IN")}`
                             : "—"}
                         </td>
                         {isReviewerRole && (
-                          <td className="px-4 text-slate-500">
+                          <td className="px-4 text-muted-foreground">
                             {myRating ? (
-                              <span className="font-semibold text-[#008993]">
+                              <span className="font-semibold text-primary">
                                 {myRating.averageScore.toFixed(1)}
                               </span>
-                            ) : "—"}
+                            ) : (
+                              "—"
+                            )}
                           </td>
                         )}
                         {canViewCycleDetail && (
                           <td className="px-4">
                             <Link
                               href={`/admin/cycles/${c.id}`}
-                              className="text-xs text-[#008993] hover:text-[#00cec4] font-medium"
+                              className="text-xs text-primary hover:text-primary/80 font-medium"
                             >
                               View →
                             </Link>

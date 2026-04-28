@@ -31,8 +31,13 @@ type Props = {
 export function AssignForm(props: Props) {
   const { appraiseeId } = props;
 
-  const isManagerRole = props.employeeRole === "MANAGER";
-  const defaultManagerCycle = isManagerRole || props.existingCycleIsManagerCycle;
+  // MANAGER and HR appraisees: only Management+HR (no TL)
+  // TL appraisee: Management+Manager+HR
+  // All others: HR+TL+Manager
+  const forceManagerCycle = props.employeeRole === "MANAGER" || props.employeeRole === "HR";
+  const forceTLCycle = props.employeeRole === "TL";
+  const isManagerRole = forceManagerCycle || forceTLCycle;
+  const defaultManagerCycle = forceManagerCycle || props.existingCycleIsManagerCycle;
 
   const initial = (role: string) =>
     props.existingAssignments.find((a) => a.role === role)?.reviewerId ?? "";
@@ -47,39 +52,45 @@ export function AssignForm(props: Props) {
   const [specialHr, setSpecialHr] = useState("");
   const [specialTl, setSpecialTl] = useState("");
   const [specialMgr, setSpecialMgr] = useState("");
-  const [specialIsManagerCycle, setSpecialIsManagerCycle] = useState(isManagerRole);
+  const [specialIsManagerCycle, setSpecialIsManagerCycle] = useState(forceManagerCycle);
   const [specialPending, startSpecialTransition] = useTransition();
 
   const hasActive = !!props.existingCycleId;
-  const allSet = isManagerCycle ? (hr && mgr) : (hr && tl && mgr);
-  const specialAllSet = specialIsManagerCycle ? (specialHr && specialMgr) : (specialHr && specialTl && specialMgr);
+  // For TL employees: all three slots (HR+TL+MGR) required, never manager cycle
+  // For MANAGER/HR employees: only HR+MGR required, always manager cycle (no TL)
+  const allSet = (forceManagerCycle || isManagerCycle) ? (hr && mgr) : (hr && tl && mgr);
+  const specialAllSet = (forceManagerCycle || specialIsManagerCycle) ? (specialHr && specialMgr) : (specialHr && specialTl && specialMgr);
+
+  const effectiveManagerCycle = forceManagerCycle || (isManagerCycle && !forceTLCycle);
 
   function submit() {
     if (!hr || !mgr) { toast.error("HR and Manager reviewers required"); return; }
-    if (!isManagerCycle && !tl) { toast.error("TL reviewer required for non-manager cycles"); return; }
+    if (!effectiveManagerCycle && !tl) { toast.error("TL reviewer required for non-manager cycles"); return; }
     startTransition(async () => {
       const res = await assignReviewersAction({
         employeeId: props.employeeId,
         hrId: hr,
-        tlId: isManagerCycle ? undefined : tl,
+        tlId: effectiveManagerCycle ? undefined : tl,
         mgrId: mgr,
-        isManagerCycle,
+        isManagerCycle: effectiveManagerCycle,
       });
       if (res.ok) toast.success("Reviewers assigned — notifications sent");
       else toast.error(res.error ?? "Failed");
     });
   }
 
+  const effectiveSpecialManagerCycle = forceManagerCycle || (specialIsManagerCycle && !forceTLCycle);
+
   function submitSpecial() {
     if (!specialHr || !specialMgr) { toast.error("HR and Manager reviewers required"); return; }
-    if (!specialIsManagerCycle && !specialTl) { toast.error("TL reviewer required for non-manager cycles"); return; }
+    if (!effectiveSpecialManagerCycle && !specialTl) { toast.error("TL reviewer required for non-manager cycles"); return; }
     startSpecialTransition(async () => {
       const res = await startSpecialAppraisalAction({
         employeeId: props.employeeId,
         hrId: specialHr,
-        tlId: specialIsManagerCycle ? undefined : specialTl,
+        tlId: effectiveSpecialManagerCycle ? undefined : specialTl,
         mgrId: specialMgr,
-        isManagerCycle: specialIsManagerCycle,
+        isManagerCycle: effectiveSpecialManagerCycle,
       });
       if (res.ok) toast.success("Special appraisal started — notifications sent");
       else toast.error(res.error ?? "Failed");
@@ -124,29 +135,33 @@ export function AssignForm(props: Props) {
           {/* Manager cycle toggle */}
           <label className="flex items-center gap-3 cursor-pointer select-none">
             <div
-              className={`relative w-10 h-5 rounded-full transition-colors ${isManagerCycle ? "bg-purple-600" : "bg-slate-300 dark:bg-slate-600"}`}
-              onClick={() => { if (!isManagerRole) setIsManagerCycle((v) => !v); }}
+              className={`relative w-10 h-5 rounded-full transition-colors ${(forceManagerCycle || isManagerCycle) ? "bg-purple-600" : "bg-slate-300 dark:bg-slate-600"} ${forceManagerCycle || forceTLCycle ? "opacity-60 cursor-not-allowed" : ""}`}
+              onClick={() => { if (!forceManagerCycle && !forceTLCycle) setIsManagerCycle((v) => !v); }}
             >
-              <span className={`absolute top-0.5 left-0.5 size-4 bg-white rounded-full shadow transition-transform ${isManagerCycle ? "translate-x-5" : ""}`} />
+              <span className={`absolute top-0.5 left-0.5 size-4 bg-white rounded-full shadow transition-transform ${(forceManagerCycle || isManagerCycle) ? "translate-x-5" : ""}`} />
             </div>
             <span className="text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
               <AlertTriangle className="size-3 text-purple-500" />
               Manager Cycle
-              <span className="text-slate-400 font-normal">(no TL — MANAGEMENT rates instead)</span>
+              {forceManagerCycle && <span className="text-purple-500 font-normal">(locked — {props.employeeRole} appraisees rated by Management + HR only)</span>}
+              {forceTLCycle && <span className="text-amber-500 font-normal">(locked — TL appraisees rated by Management + Manager + HR)</span>}
+              {!forceManagerCycle && !forceTLCycle && <span className="text-slate-400 font-normal">(no TL — MANAGEMENT rates instead)</span>}
             </span>
           </label>
 
-          <div className={`grid grid-cols-1 gap-4 ${isManagerCycle ? "sm:grid-cols-2" : "sm:grid-cols-3"}`}>
+          <div className={`grid grid-cols-1 gap-4 ${(forceManagerCycle || (isManagerCycle && !forceTLCycle)) ? "sm:grid-cols-2" : "sm:grid-cols-3"}`}>
             <ReviewerPicker label="HR Reviewer" color="bg-green-500" value={hr} onChange={setHr} options={props.hrUsers} appraiseeId={appraiseeId} />
-            {!isManagerCycle && (
+            {(forceTLCycle || (!forceManagerCycle && !isManagerCycle)) && (
               <ReviewerPicker label="TL Reviewer" color="bg-amber-500" value={tl} onChange={setTl} options={props.tlUsers} appraiseeId={appraiseeId} />
             )}
             <ReviewerPicker label="Manager Reviewer" color="bg-blue-500" value={mgr} onChange={setMgr} options={props.mgrUsers} appraiseeId={appraiseeId} />
           </div>
 
-          {isManagerCycle && (
+          {(forceManagerCycle || (isManagerCycle && !forceTLCycle)) && (
             <p className="text-xs text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 rounded-lg px-3 py-2">
-              Manager cycle: HR confirms availability, then MANAGEMENT team provides the final rating.
+              {forceManagerCycle
+                ? `${props.employeeRole} appraisal: HR confirms availability, MANAGEMENT team provides the final rating.`
+                : "Manager cycle: HR confirms availability, then MANAGEMENT team provides the final rating."}
             </p>
           )}
 
@@ -179,21 +194,23 @@ export function AssignForm(props: Props) {
           <CardContent className="space-y-5">
             <label className="flex items-center gap-3 cursor-pointer select-none">
               <div
-                className={`relative w-10 h-5 rounded-full transition-colors ${specialIsManagerCycle ? "bg-purple-600" : "bg-slate-300 dark:bg-slate-600"}`}
-                onClick={() => { if (!isManagerRole) setSpecialIsManagerCycle((v) => !v); }}
+                className={`relative w-10 h-5 rounded-full transition-colors ${effectiveSpecialManagerCycle ? "bg-purple-600" : "bg-slate-300 dark:bg-slate-600"} ${forceManagerCycle || forceTLCycle ? "opacity-60 cursor-not-allowed" : ""}`}
+                onClick={() => { if (!forceManagerCycle && !forceTLCycle) setSpecialIsManagerCycle((v) => !v); }}
               >
-                <span className={`absolute top-0.5 left-0.5 size-4 bg-white rounded-full shadow transition-transform ${specialIsManagerCycle ? "translate-x-5" : ""}`} />
+                <span className={`absolute top-0.5 left-0.5 size-4 bg-white rounded-full shadow transition-transform ${effectiveSpecialManagerCycle ? "translate-x-5" : ""}`} />
               </div>
               <span className="text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                 <AlertTriangle className="size-3 text-purple-500" />
                 Manager Cycle
-                <span className="text-slate-400 font-normal">(no TL — MANAGEMENT rates instead)</span>
+                {forceManagerCycle && <span className="text-purple-500 font-normal">(locked — {props.employeeRole} appraisees rated by Management + HR only)</span>}
+                {forceTLCycle && <span className="text-amber-500 font-normal">(locked — TL appraisees rated by Management + Manager + HR)</span>}
+                {!forceManagerCycle && !forceTLCycle && <span className="text-slate-400 font-normal">(no TL — MANAGEMENT rates instead)</span>}
               </span>
             </label>
 
-            <div className={`grid grid-cols-1 gap-4 ${specialIsManagerCycle ? "sm:grid-cols-2" : "sm:grid-cols-3"}`}>
+            <div className={`grid grid-cols-1 gap-4 ${effectiveSpecialManagerCycle ? "sm:grid-cols-2" : "sm:grid-cols-3"}`}>
               <ReviewerPicker label="HR Reviewer" color="bg-green-500" value={specialHr} onChange={setSpecialHr} options={props.hrUsers} appraiseeId={appraiseeId} />
-              {!specialIsManagerCycle && (
+              {(forceTLCycle || (!forceManagerCycle && !specialIsManagerCycle)) && (
                 <ReviewerPicker label="TL Reviewer" color="bg-amber-500" value={specialTl} onChange={setSpecialTl} options={props.tlUsers} appraiseeId={appraiseeId} />
               )}
               <ReviewerPicker label="Manager Reviewer" color="bg-blue-500" value={specialMgr} onChange={setSpecialMgr} options={props.mgrUsers} appraiseeId={appraiseeId} />

@@ -36,7 +36,8 @@ export function DemoControls({ cycleId, editableUntil, submittedAt }: Props) {
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         <div>
-          Current self-assessment deadline: <b>{new Date(editableUntil).toLocaleString()}</b>
+          Current self-assessment deadline:{" "}
+          <b suppressHydrationWarning>{new Date(editableUntil).toLocaleString()}</b>
         </div>
         <div>
           Submission state: <b>{submittedAt ? "Submitted" : "Pending"}</b>

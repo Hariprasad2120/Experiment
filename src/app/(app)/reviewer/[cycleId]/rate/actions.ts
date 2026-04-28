@@ -6,7 +6,7 @@ import { prisma } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { sendEmail, rateCompletedEmail } from "@/lib/email";
 import { isRatingOpen, syncCycleStatus } from "@/lib/workflow";
-import { TOTAL_MAX_POINTS } from "@/lib/criteria";
+import { CRITERIA_CATEGORIES, getCriteriaForRole } from "@/lib/criteria";
 
 const schema = z.object({
   cycleId: z.string(),
@@ -55,22 +55,29 @@ export async function submitRatingAction(input: z.infer<typeof schema>): Promise
     if (peerCount === 0) return { ok: false, error: "Cannot Average Out — no peer has rated yet" };
   }
 
-  // Normalize: sum of category scores / total max * 100
+  // Normalize: sum of category scores / role-specific max * 100
+  const roleCategories = getCriteriaForRole(CRITERIA_CATEGORIES, role);
+  const roleTotalMaxPoints = roleCategories.reduce((s, c) => s + c.maxPoints, 0);
   const numericValues = Object.values(scores).filter((v) => v > 0);
   const rawSum = numericValues.reduce((s, v) => s + v, 0);
-  const avg = (rawSum / TOTAL_MAX_POINTS) * 100;
+  const avg = (rawSum / roleTotalMaxPoints) * 100;
 
   if (hasAverageOut) {
     const peerRatings = await prisma.rating.findMany({ where: { cycleId } });
     const peerAvgNormalized = peerRatings.reduce((s, r) => s + r.averageScore, 0) / peerRatings.length;
-    // peerAvgNormalized is already 0-100; convert back to raw for averaged-out categories
-    const peerRawEquivalent = (peerAvgNormalized / 100) * TOTAL_MAX_POINTS;
+    // For each averaged-out criterion, substitute peer's normalized % of THAT criterion's max points
+    const catMaxByName = new Map(roleCategories.map((c) => [c.name, c.maxPoints]));
     const resolvedScores: Record<string, number> = {};
     for (const [k, v] of Object.entries(scores)) {
-      resolvedScores[k] = v === -1 ? peerRawEquivalent : v;
+      if (v === -1) {
+        const catMax = catMaxByName.get(k) ?? 0;
+        resolvedScores[k] = (peerAvgNormalized / 100) * catMax;
+      } else {
+        resolvedScores[k] = v;
+      }
     }
     const resolvedRawSum = Object.values(resolvedScores).reduce((s, v) => s + v, 0);
-    const resolvedAvg = (resolvedRawSum / TOTAL_MAX_POINTS) * 100;
+    const resolvedAvg = (resolvedRawSum / roleTotalMaxPoints) * 100;
 
     await prisma.$transaction(async (tx) => {
       await tx.rating.create({
@@ -87,13 +94,50 @@ export async function submitRatingAction(input: z.infer<typeof schema>): Promise
     });
   }
 
-  const otherAssignments = await prisma.cycleAssignment.findMany({
-    where: { cycleId, reviewerId: { not: session.user.id } },
-    include: { reviewer: true, cycle: { include: { user: true } } },
+  const cycleWithUser = await prisma.appraisalCycle.findUnique({
+    where: { id: cycleId },
+    include: {
+      user: { select: { id: true, name: true } },
+      assignments: { include: { reviewer: { select: { id: true, name: true, email: true } } } },
+    },
   });
-  for (const oa of otherAssignments) {
-    const mail = rateCompletedEmail({ otherReviewerName: oa.reviewer.name, employeeName: oa.cycle.user.name, ratedByRole: role });
-    await sendEmail({ to: oa.reviewer.email, ...mail }).catch(() => {});
+
+  if (cycleWithUser) {
+    const otherReviewers = cycleWithUser.assignments
+      .map((a) => a.reviewer)
+      .filter((r) => r.id !== session.user.id);
+
+    // Email other reviewers
+    for (const r of otherReviewers) {
+      const mail = rateCompletedEmail({ otherReviewerName: r.name, employeeName: cycleWithUser.user.name, ratedByRole: role });
+      await sendEmail({ to: r.email, ...mail }).catch(() => {});
+    }
+
+    // Popup notifications: admin + management + employee
+    const [adminUsers, managementUsers] = await Promise.all([
+      prisma.user.findMany({ where: { role: "ADMIN", active: true }, select: { id: true } }),
+      prisma.user.findMany({ where: { role: "MANAGEMENT", active: true }, select: { id: true } }),
+    ]);
+    const notifyIds = [
+      ...new Set([
+        ...adminUsers.map((u) => u.id),
+        ...managementUsers.map((u) => u.id),
+        cycleWithUser.user.id,
+      ]),
+    ];
+    await Promise.all(
+      notifyIds.map((userId) =>
+        prisma.notification.create({
+          data: {
+            userId,
+            type: "RATING_SUBMITTED",
+            message: `${role} reviewer has submitted their rating for ${cycleWithUser.user.name}'s appraisal.`,
+            link: userId === cycleWithUser.user.id ? "/employee" : `/management/decide/${cycleId}`,
+            persistent: false,
+          },
+        })
+      )
+    );
   }
 
   await syncCycleStatus(cycleId);

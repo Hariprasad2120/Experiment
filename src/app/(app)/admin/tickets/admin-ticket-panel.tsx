@@ -86,7 +86,7 @@ function AdminTicketCard({ ticket }: { ticket: Ticket }) {
             <p className="text-xs text-slate-400 mt-0.5">
               {ticket.raisedBy.name} · {ticket.raisedBy.role}
               {ticket.raisedBy.department ? ` · ${ticket.raisedBy.department}` : ""}
-              {" · "}{ticket.createdAt.toLocaleString()}
+              {" · "}<span suppressHydrationWarning>{ticket.createdAt.toLocaleString()}</span>
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -137,7 +137,7 @@ function AdminTicketCard({ ticket }: { ticket: Ticket }) {
                       <span className={`text-[10px] px-1 rounded ${c.author.role === "ADMIN" ? "text-[#00cec4]" : "text-slate-400"}`}>
                         {c.author.role}
                       </span>
-                      <span className="text-[10px] text-slate-400 ml-auto">{new Date(c.createdAt).toLocaleString()}</span>
+                      <span className="text-[10px] text-slate-400 ml-auto" suppressHydrationWarning>{new Date(c.createdAt).toLocaleString()}</span>
                     </div>
                     <p className="text-slate-700 dark:text-slate-300">{c.message}</p>
                   </div>

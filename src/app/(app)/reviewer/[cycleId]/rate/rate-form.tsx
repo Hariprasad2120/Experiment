@@ -7,10 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { submitRatingAction } from "./actions";
 import { motion } from "motion/react";
-import { Info } from "lucide-react";
+import { Info, Wand2 } from "lucide-react";
 import type { CriteriaCategory } from "@/lib/criteria";
 import { GRADE_BANDS } from "@/lib/criteria";
 import { AlertCircle } from "lucide-react";
+
+type PerformerPreset = "high" | "average" | "low";
 
 type Score = number | "AVERAGE_OUT";
 
@@ -20,12 +22,14 @@ export function RateForm({
   categories,
   totalMaxPoints,
   peerRatingExists,
+  isAdmin = false,
 }: {
   cycleId: string;
   role: "HR" | "TL" | "MANAGER";
   categories: CriteriaCategory[];
   totalMaxPoints: number;
   peerRatingExists: boolean;
+  isAdmin?: boolean;
 }) {
   const [scores, setScores] = useState<Record<string, Score>>(
     Object.fromEntries(categories.map((c) => [c.name, 0])),
@@ -39,7 +43,36 @@ export function RateForm({
   const router = useRouter();
   const criteriaRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
+  const [performerPreset, setPerformerPreset] = useState<PerformerPreset>("high");
   const isTL = role === "TL";
+
+  function demoFill() {
+    const multipliers: Record<PerformerPreset, number> = { high: 0.9, average: 0.65, low: 0.4 };
+    const base = multipliers[performerPreset];
+    const DEMO_COMMENTS: Record<PerformerPreset, string> = {
+      high: "Consistently exceeds expectations with outstanding quality of work.",
+      average: "Meets expectations reliably; shows good potential for growth.",
+      low: "Requires improvement in key areas; additional support recommended.",
+    };
+    const CAT_COMMENTS: Record<PerformerPreset, (cat: string) => string> = {
+      high: (c) => `Strong performance in ${c.toLowerCase()}. Sets a benchmark for the team.`,
+      average: (c) => `Adequate performance in ${c.toLowerCase()}. Room for further development.`,
+      low: (c) => `Needs focused improvement in ${c.toLowerCase()}. Coaching recommended.`,
+    };
+    // Vary scores slightly across categories for realism
+    const newScores: Record<string, Score> = {};
+    categories.forEach((cat, i) => {
+      const jitter = ((i % 3) - 1) * 0.07;
+      const ratio = Math.min(1, Math.max(0.1, base + jitter));
+      newScores[cat.name] = Math.round(cat.maxPoints * ratio * 2) / 2;
+    });
+    setScores(newScores);
+    const newCatComments: Record<string, string> = {};
+    categories.forEach((cat) => { newCatComments[cat.name] = CAT_COMMENTS[performerPreset](cat.name); });
+    setCatComments(newCatComments);
+    setOverallComments(DEMO_COMMENTS[performerPreset]);
+    toast.success("Demo data filled — review before submitting");
+  }
 
   function setScore(name: string, value: Score) {
     if (value === "AVERAGE_OUT") {
@@ -317,6 +350,41 @@ export function RateForm({
         <div className="flex gap-2 text-xs text-slate-500 bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
           <Info className="size-3.5 shrink-0 mt-0.5" />
           As TL, Average Out is not available to you.
+        </div>
+      )}
+
+      {isAdmin && (
+        <div className="rounded-xl border border-dashed border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/20 p-3 space-y-2">
+          <div className="flex items-center gap-2 text-xs font-semibold text-amber-700 dark:text-amber-400">
+            <Wand2 className="size-3.5" />
+            Demo Fill (Admin only)
+          </div>
+          <div className="flex gap-1.5 flex-wrap">
+            {(["high", "average", "low"] as PerformerPreset[]).map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => setPerformerPreset(p)}
+                className={`text-[10px] px-2.5 py-1 rounded-full border transition-colors font-medium capitalize ${
+                  performerPreset === p
+                    ? "bg-amber-500 text-white border-amber-500"
+                    : "border-amber-300 text-amber-600 dark:border-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30"
+                }`}
+              >
+                {p === "high" ? "High Performer" : p === "average" ? "Average Performer" : "Low Performer"}
+              </button>
+            ))}
+          </div>
+          <Button
+            type="button"
+            onClick={demoFill}
+            variant="outline"
+            size="sm"
+            className="w-full text-xs border-amber-300 text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:text-amber-400"
+          >
+            <Wand2 className="size-3 mr-1.5" />
+            Auto-fill all fields
+          </Button>
         </div>
       )}
 

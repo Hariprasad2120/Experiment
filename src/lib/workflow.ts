@@ -119,6 +119,7 @@ export async function syncCycleStatus(cycleId: string): Promise<CycleStatus | nu
       assignments: {
         select: {
           availability: true,
+          reviewerId: true,
         },
       },
       ratings: {
@@ -127,17 +128,42 @@ export async function syncCycleStatus(cycleId: string): Promise<CycleStatus | nu
           reviewerId: true,
         },
       },
+      user: { select: { name: true } },
     },
   });
 
   if (!cycle) return null;
 
+  const prevStatus = cycle.status;
   const nextStatus = computeCycleStatus(cycle);
-  if (cycle.status !== nextStatus) {
+  if (prevStatus !== nextStatus) {
     await prisma.appraisalCycle.update({
       where: { id: cycleId },
       data: { status: nextStatus },
     });
+
+    // When all reviewers done → notify management + admin that it's ready for review
+    if (nextStatus === "MANAGEMENT_REVIEW") {
+      const [adminUsers, managementUsers] = await Promise.all([
+        prisma.user.findMany({ where: { role: "ADMIN", active: true }, select: { id: true } }),
+        prisma.user.findMany({ where: { role: "MANAGEMENT", active: true }, select: { id: true } }),
+      ]);
+      const notifyIds = [...new Set([...adminUsers.map((u) => u.id), ...managementUsers.map((u) => u.id)])];
+      const empName = cycle.user?.name ?? "an employee";
+      await Promise.all(
+        notifyIds.map((userId) =>
+          prisma.notification.create({
+            data: {
+              userId,
+              type: "RATINGS_COMPLETE",
+              message: `All reviewers have submitted ratings for ${empName}. Appraisal is ready for management review.`,
+              link: `/management/decide/${cycleId}`,
+              persistent: true,
+            },
+          })
+        )
+      );
+    }
   }
 
   return nextStatus;

@@ -339,6 +339,7 @@ export default async function RatePage({
               categories={mergedCategories}
               totalMaxPoints={roleMaxPoints}
               peerRatingExists={peerRatingExists}
+              isAdmin={true}
             />
           </FadeIn>
         </div>
